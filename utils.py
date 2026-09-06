@@ -1,10 +1,13 @@
+# utils.py
 import os
+import random
 import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import (
     precision_score, recall_score, f1_score, accuracy_score,
     matthews_corrcoef, confusion_matrix
@@ -14,7 +17,7 @@ from torch.utils.data import Dataset
 try:
     import torch_directml
     DEVICE = torch_directml.device()
-    GNN_DEVICE = torch.device("cpu")  # DirectML lacks PyG index_select support
+    GNN_DEVICE = torch.device("cpu") 
     print(f"[SYSTEM] Hardware detected: DirectML ({DEVICE}), GNN will run on CPU")
 except ImportError:
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -46,6 +49,23 @@ class JobTextDataset(Dataset):
             "attention_mask": encoding["attention_mask"].flatten(),
             "label": torch.tensor(self.labels[idx], dtype=torch.float),
         }
+
+
+def set_seed(seed=42):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        # Ensure deterministic behavior for cuDNN
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    
+    print(f"[SYSTEM] Random seed set to {seed}")
+
 
 def load_and_split_data(csv_path="data/fake_job_postings.csv"):
     print("\n--- STAGE 1: DATA INGESTION ---")
@@ -146,3 +166,23 @@ def plot_training_history(history, model_name):
     plt.savefig(save_path)
     plt.close()
     print(f"[INFO] Plot saved to {save_path}")
+    
+def stratified_kfold_masks(labels, k=5, seed=42):
+    skf = StratifiedKFold(n_splits=k, shuffle=True, random_state=seed)
+    n = len(labels)
+    
+    for fold_i, (train_idx, test_idx) in enumerate(skf.split(np.zeros(n), labels)):
+        # Split the training fold further to create a validation set
+        train_idx, val_idx = train_test_split(
+            train_idx, test_size=0.15, stratify=labels[train_idx], random_state=seed
+        )
+        
+        train_mask = torch.zeros(n, dtype=torch.bool)
+        val_mask = torch.zeros(n, dtype=torch.bool)
+        test_mask = torch.zeros(n, dtype=torch.bool)
+        
+        train_mask[train_idx] = True
+        val_mask[val_idx] = True
+        test_mask[test_idx] = True
+        
+        yield fold_i, train_mask, val_mask, test_mask
