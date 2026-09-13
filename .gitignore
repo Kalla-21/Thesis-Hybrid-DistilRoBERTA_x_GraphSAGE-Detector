@@ -1,0 +1,6 @@
+venv/
+.venv/
+env/
+my_project-venv/
+__pycache__/
+model/__pycache__/
