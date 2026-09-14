@@ -1,0 +1,26 @@
+name: Sync UI to Thesis Model Repo
+
+on:
+  push:
+    branches:
+      - main  # Change this to master if your default branch name is master
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout your repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to colleague's thesis-ui branch
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          
+          # Links your code environment to your colleague's target repository securely using your custom secret token
+          git remote add target https://x-access-token:${{ secrets.Bananalynn_Repo_Token }}@://github.com
+          
+          # Force pushes your main branch data directly into their thesis-ui branch, completely updating it
+          git push target main:thesis-ui --force
