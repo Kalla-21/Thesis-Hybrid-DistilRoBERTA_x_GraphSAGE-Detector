@@ -20,7 +20,7 @@ jobs:
           git config --global user.email "action@github.com"
           
           # Links your code environment to your colleague's target repository securely using your custom secret token
-          git remote add target https://x-access-token:${{ secrets.Bananalynn_Repo_Token }}@://github.com
+          git remote add target https://x-access-token:${{ secrets.BANANALYN_REPO_TOKEN }}@://github.com
           
           # Force pushes your main branch data directly into their thesis-ui branch, completely updating it
           git push target main:thesis-ui --force
