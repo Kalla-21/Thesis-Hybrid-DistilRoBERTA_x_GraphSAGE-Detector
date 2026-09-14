@@ -12,3 +12,6 @@ HOW TO USE:
 uvicorn main:app --reload
 
 2. After doing that and it says "Application startup complete", right click index.html, then press "Open in integrated browser"
+
+To push to own repo and bananalynn repo, run this command:
+git sync
