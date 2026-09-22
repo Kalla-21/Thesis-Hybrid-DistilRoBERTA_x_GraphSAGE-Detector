@@ -2,43 +2,52 @@
 import torch
 import torch.nn as nn
 from torch_geometric.nn import SAGEConv
+ 
+ 
+class CrossAttentionFusion(nn.Module): # now uses graphsage nodes to use as 3-length key-value pair for cross-attention
 
-
-
-class CrossAttentionFusion(nn.Module):
-
-    def __init__(self, text_dim=768, graph_dim=128, attn_dim=128, num_heads=4, dropout=0.1):
+    def __init__(self, text_dim=768, graph_dims=(256, 256, 128), attn_dim=128,
+                 num_heads=4, dropout=0.1):
         super().__init__()
+        self.attn_dim = attn_dim
         self.w_t = nn.Linear(text_dim, attn_dim)
-        self.w_g = nn.Linear(graph_dim, attn_dim)
+        self.w_g = nn.ModuleList([nn.Linear(d, attn_dim) for d in graph_dims])
+
         self.attn_t2g = nn.MultiheadAttention(attn_dim, num_heads=num_heads,
                                                dropout=dropout, batch_first=True)
-        self.attn_g2t = nn.MultiheadAttention(attn_dim, num_heads=num_heads,
-                                               dropout=dropout, batch_first=True)
+        # used for pooling the graph sequence down to one vector
+        self.attn_pool = nn.MultiheadAttention(attn_dim, num_heads=num_heads,
+                                                dropout=dropout, batch_first=True)
+
         self.norm_t = nn.LayerNorm(attn_dim)
         self.norm_g = nn.LayerNorm(attn_dim)
 
-    def forward(self, h_text, h_graph, x_tab):
-        # (N, dim) -> (N, 1, attn_dim); MultiheadAttention wants a sequence dim.
-        t = self.w_t(h_text).unsqueeze(1)
-        g = self.w_g(h_graph).unsqueeze(1)
+        # learned query used to pool the 3-length graph sequence into 1 vector
+        self.pool_query = nn.Parameter(torch.randn(1, 1, attn_dim))
 
-        t_attend_g, attn_weights_t2g = self.attn_t2g(query=t, key=g, value=g)
-        g_attend_t, attn_weights_g2t = self.attn_g2t(query=g, key=t, value=t)
+    def forward(self, h_text, graph_hops, x_tab):
+        N = h_text.shape[0]
 
-        t_out = self.norm_t(t_attend_g.squeeze(1) + t.squeeze(1))  # residual + norm
-        g_out = self.norm_g(g_attend_t.squeeze(1) + g.squeeze(1))
+        t = self.w_t(h_text).unsqueeze(1)                                   
+        g_seq = torch.stack(
+            [proj(h) for proj, h in zip(self.w_g, graph_hops)], dim=1
+        )                                                                  
+
+        t_attend_g, attn_weights_t2g = self.attn_t2g(query=t, key=g_seq, value=g_seq)
+        t_out = self.norm_t(t_attend_g.squeeze(1) + t.squeeze(1))           
+
+        pool_q = self.pool_query.expand(N, -1, -1)                          
+        g_pooled, attn_weights_pool = self.attn_pool(query=pool_q, key=g_seq, value=g_seq)
+        g_out = self.norm_g(g_pooled.squeeze(1))                           
 
         fused = torch.cat([t_out, g_out, x_tab], dim=1)
 
-        # Stashed for the attention-visualization XAI phase (C.6) later on --
-        # both directions' raw weights, shape (N, num_heads, 1, 1) per call.
-        self.last_attn_weights = {"t2g": attn_weights_t2g, "g2t": attn_weights_g2t}
+        self.last_attn_weights = {"t2g": attn_weights_t2g, "graph_pool": attn_weights_pool}
         return fused
 
     @property
     def output_dim(self):
-        return self.w_t.out_features + self.w_g.out_features
+        return self.attn_dim * 2  # t_out + g_out, both attn_dim
 
 
 class FraudDetectionGraphSAGE(nn.Module):
@@ -53,7 +62,7 @@ class FraudDetectionGraphSAGE(nn.Module):
         self.fusion_mode = fusion_mode
         self.dropout_rate = dropout
 
-        # The GNN trunk only processes the text embeddings (as in the original design).
+        # The gnn takes embeddings
         self.conv1 = SAGEConv(text_dim, hidden_channels)
         self.conv2 = SAGEConv(hidden_channels, hidden_channels)
         self.conv3 = SAGEConv(hidden_channels, out_channels)
@@ -66,11 +75,14 @@ class FraudDetectionGraphSAGE(nn.Module):
             self.fusion = None
             fused_dim = text_dim + out_channels + tabular_dim
         else:
-            self.fusion = CrossAttentionFusion(text_dim=text_dim, graph_dim=out_channels,
-                                                attn_dim=attn_dim)
+            self.fusion = CrossAttentionFusion(
+                text_dim=text_dim,
+                graph_dims=(hidden_channels, hidden_channels, out_channels),  # conv1, conv2, conv3 dims
+                attn_dim=attn_dim,
+            )
             fused_dim = self.fusion.output_dim + tabular_dim
 
-        # Same MLP classifier head for both fusion conditions, per Ch.3 C.4.
+        # Same MLP classifier head for both fusion conditions
         self.classifier = nn.Sequential(
             nn.Linear(fused_dim, 256),
             nn.ReLU(),
@@ -82,18 +94,19 @@ class FraudDetectionGraphSAGE(nn.Module):
         )
 
     def forward(self, x_text, edge_index, x_tab):
-        h = torch.relu(self.bn1(self.conv1(x_text, edge_index)))
-        h = torch.dropout(h, p=self.dropout_rate, train=self.training)
+        h1 = torch.relu(self.bn1(self.conv1(x_text, edge_index)))
+        h1_drop = torch.dropout(h1, p=self.dropout_rate, train=self.training)
 
-        h = torch.relu(self.bn2(self.conv2(h, edge_index)))
-        h = torch.dropout(h, p=self.dropout_rate, train=self.training)
+        h2 = torch.relu(self.bn2(self.conv2(h1_drop, edge_index)))
+        h2_drop = torch.dropout(h2, p=self.dropout_rate, train=self.training)
 
-        h = torch.relu(self.bn3(self.conv3(h, edge_index)))
+        h3 = torch.relu(self.bn3(self.conv3(h2_drop, edge_index)))
 
         if self.fusion_mode == "concat":
-            fused = torch.cat([x_text, h, x_tab], dim=1)
+            fused = torch.cat([x_text, h3, x_tab], dim=1)
         else:
-            fused = self.fusion(x_text, h, x_tab)
+            # pass all 3 hop-representations as the graph key/value sequence
+            fused = self.fusion(x_text, [h1, h2, h3], x_tab)
 
         return self.classifier(fused)
 
@@ -132,7 +145,7 @@ class GraphSAGEOnlyBaseline(nn.Module):
         self.bn2 = nn.BatchNorm1d(hidden_channels)
         self.bn3 = nn.BatchNorm1d(out_channels)
 
-        # Same-shaped classifier head as the original single-branch design.
+    
         self.classifier = nn.Sequential(
             nn.Linear(out_channels, 64),
             nn.ReLU(),

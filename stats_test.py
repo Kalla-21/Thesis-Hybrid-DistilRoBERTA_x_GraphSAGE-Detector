@@ -32,7 +32,7 @@ def compare(primary_scores, baseline_scores, metric_name):
         try:
             stat, p = stats.wilcoxon(primary_scores, baseline_scores)
         except ValueError:
-            # Raised if all differences are 0, or n is too small for Wilcoxon.
+            # if difference is 0, wilcoxon wont work
             stat, p = float("nan"), float("nan")
         test_used = "Wilcoxon signed-rank"
 

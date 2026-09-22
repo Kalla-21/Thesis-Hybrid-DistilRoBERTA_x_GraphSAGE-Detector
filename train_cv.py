@@ -22,8 +22,8 @@ from models.graphsage_model import (
 CV_CONFIG = {
     "k_folds":         5,
     "seed":            42,
-    "pos_weight_cap":  4.0,   # best cap found by your original sweep in train.py
-    "lr":              0.00075,
+    "pos_weight_cap":  4.0,   #<-- possible change
+    "lr":              0.00075,   #<-- possible change
     "epochs":          200,
     "patience":        25,
     "grad_clip":       1.0,
@@ -79,7 +79,7 @@ def train_one_model(model, forward_fn, y, train_mask, val_mask, test_mask,
             logits = forward_fn(model)
             probs = torch.sigmoid(logits).squeeze()
 
-        # threshold-independent val F1, used for early stopping / checkpointing
+        # threshold-independent val F1, used for early stopping 
         val_probs_np = probs[val_mask].cpu().numpy()
         val_y_np = y[val_mask].cpu().numpy()
         _, val_f1 = tune_threshold(val_probs_np, val_y_np, cfg["threshold_steps"])
@@ -101,7 +101,7 @@ def train_one_model(model, forward_fn, y, train_mask, val_mask, test_mask,
               "falling back to the final epoch's weights instead of crashing.")
         best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
-    # --- final evaluation, using the best checkpoint loaded back in ---
+    # final evaluation, using the best checkpoint loaded back in
     model.load_state_dict(best_state)
     model.eval()
     with torch.no_grad():
@@ -159,7 +159,7 @@ def run():
         capped_weight = min(raw_weight, CV_CONFIG["pos_weight_cap"])
         pos_weight = torch.tensor([capped_weight], dtype=torch.float).to(GNN_DEVICE)
 
-        # --- Condition 1: DistilRoBERTa only ---
+        # standalone DistilRoBERTa 
         set_seed(CV_CONFIG["seed"] + fold_i)
         model = DistilRobertaOnlyClassifier(text_dim=x_text.shape[1])
         metrics, thresh, _probs = train_one_model(
@@ -169,7 +169,7 @@ def run():
         print(f"[distilroberta_only] F1={metrics['f1']:.4f} MCC={metrics['mcc']:.4f} (thresh={thresh:.3f})")
         results["distilroberta_only"].append(metrics)
 
-        # --- Condition 2: GraphSAGE only (structure only, random-init features) ---
+        # standalone GraphSAGE only 
         set_seed(CV_CONFIG["seed"] + fold_i)
         model = GraphSAGEOnlyBaseline(
             num_nodes=num_nodes, rand_dim=x_text.shape[1], seed=CV_CONFIG["seed"]
@@ -181,7 +181,7 @@ def run():
         print(f"[graphsage_only]     F1={metrics['f1']:.4f} MCC={metrics['mcc']:.4f} (thresh={thresh:.3f})")
         results["graphsage_only"].append(metrics)
 
-        # --- Condition 3: late-fusion concatenation (ablation baseline) ---
+        # late-fusion concatenation (ablation baseline)
         set_seed(CV_CONFIG["seed"] + fold_i)
         model = FraudDetectionGraphSAGE(
             text_dim=x_text.shape[1], tabular_dim=x_tab.shape[1], fusion_mode="concat"
@@ -193,7 +193,7 @@ def run():
         print(f"[late_concat]        F1={metrics['f1']:.4f} MCC={metrics['mcc']:.4f} (thresh={thresh:.3f})")
         results["late_concat"].append(metrics)
 
-        # --- Condition 4: cross-attention fusion (primary proposed architecture) ---
+        # cross-attention fusion (primary proposed architecture) 
         set_seed(CV_CONFIG["seed"] + fold_i)
         model = FraudDetectionGraphSAGE(
             text_dim=x_text.shape[1], tabular_dim=x_tab.shape[1], fusion_mode="cross_attention"

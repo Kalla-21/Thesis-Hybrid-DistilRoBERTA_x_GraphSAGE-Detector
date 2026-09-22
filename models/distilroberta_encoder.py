@@ -10,7 +10,6 @@ class DistilRobertaModule(nn.Module):
         super().__init__()
         self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        # Classification head removed to save VRAM 
         self.encoder = AutoModel.from_pretrained(model_name).to(device)
 
     def extract_embeddings(self, dataloader):
