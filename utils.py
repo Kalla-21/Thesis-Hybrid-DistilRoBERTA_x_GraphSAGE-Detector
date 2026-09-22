@@ -1,6 +1,8 @@
 # utils.py
 import os
 import random
+import re
+import html
 import torch
 import numpy as np
 import pandas as pd
@@ -76,31 +78,88 @@ def load_and_split_data(csv_path="data/fake_job_postings.csv"):
 
     df = pd.read_csv(csv_path)
 
-    print("[PROCESS] Preprocessing text and mapping labels...")
+    # prevent data leakege by removing duplicates with conflicting labels
+    duplicates_all = df[df.duplicated(subset=['title', 'company_profile', 'description'], keep=False)]
+    conflicts = duplicates_all.groupby(['title', 'company_profile', 'description'])['fraudulent'].nunique()
+    print(f"[INFO] Found {(conflicts > 1).sum()} unique listings with conflicting legitimate/fraudulent labels.")
+    
+    # sort to keep the fraudulent label in conflicts and drop duplicates
+    df = df.sort_values(by='fraudulent', ascending=False)
+    df = df.drop_duplicates(subset=['title', 'company_profile', 'description'], keep='first')
+    df = df.reset_index(drop=True)
+    print(f"[INFO] Dataset reduced to {len(df)} rows after exact-text deduplication.")
+
+    # remove html tags and clean text columns
+    def clean_text(text):
+        if pd.isna(text) or str(text).strip() == "":
+            return ""
+        text = html.unescape(str(text))
+        text = re.sub(r'<[^>]+>', ' ', text)
+        return re.sub(r'\s+', ' ', text).strip()
+
+    text_cols = ["title", "company_profile", "description", "requirements", "benefits"]
+    print("[PROCESS] Preprocessing text and scrubbing HTML tags...")
+    for col in text_cols:
+        df[col] = df[col].apply(clean_text)
+
+    # 3. missing flags
+    df['has_company_profile'] = df['company_profile'].apply(lambda x: 1.0 if x != "" else 0.0)
+    df['has_requirements'] = df['requirements'].apply(lambda x: 1.0 if x != "" else 0.0)
+    df['has_benefits'] = df['benefits'].apply(lambda x: 1.0 if x != "" else 0.0)
+
+    # replace NaN with empty strings for concatenation
     df.fillna("", inplace=True)
 
     df["full_text"] = (
-        df["title"] + " " +
-        df["company_profile"] + " " +
-        df["description"] + " " +
-        df["requirements"] + " " +
-        df["benefits"]
+        df["title"] + " " + df["company_profile"] + " " +
+        df["description"] + " " + df["requirements"] + " " + df["benefits"]
     )
     df["label"] = df["fraudulent"].astype(int)
 
-    # --- NEW: Extract Tabular Metadata ---
+    # parse salary ranges into min, max, and a binary flag for valid salary
+    def parse_salary(val):
+        if pd.isna(val) or val == "" or "-" not in str(val):
+            return 0.0, 0.0, 0.0 
+        try:
+            clean_val = str(val).replace(',', '')
+            parts = clean_val.split('-')
+            s_min, s_max = float(parts[0]), float(parts[1])
+            if s_min == 0 and s_max == 0:
+                return 0.0, 0.0, 0.0
+            return s_min, s_max, 1.0
+        except ValueError:
+            return 0.0, 0.0, 0.0
+
+    salary_data = df['salary_range'].apply(parse_salary).tolist()
+    df['salary_min'] = [x[0] for x in salary_data]
+    df['salary_max'] = [x[1] for x in salary_data]
+    df['has_valid_salary'] = [x[2] for x in salary_data]
+
+    # 5. regex-based feature extraction for emails, phones, and URLs
+    df['emails'] = df['description'].apply(lambda x: re.findall(r'[\w\.-]+@[\w\.-]+', str(x).lower()))
+    df['phones'] = df['description'].apply(lambda x: re.findall(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', str(x)))
+    df['has_email'] = df['emails'].apply(lambda x: 1.0 if len(x) > 0 else 0.0)
+    df['has_phone'] = df['phones'].apply(lambda x: 1.0 if len(x) > 0 else 0.0)
+    df['has_url'] = df['description'].apply(lambda x: 1.0 if 'http' in str(x).lower() else 0.0)
+
+    # 6. compile tabular features into a numpy array for GNN input
     print("[PROCESS] Extracting binary/tabular features...")
-    tabular_cols = ["telecommuting", "has_company_logo", "has_questions"]
+    tabular_cols = [
+        "telecommuting", "has_company_logo", "has_questions", 
+        "has_company_profile", "has_requirements", "has_benefits",
+        "has_valid_salary", "has_email", "has_phone", "has_url"
+    ]
     for col in tabular_cols:
-        # Convert to float for neural network compatibility
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0).astype(float)
     tabular_features = df[tabular_cols].values
 
-    # --- EXPANDED: Graph Edges ---
-    print("[PROCESS] Building expanded graph edges...")
-    edges_source, edges_target = [], []
+    # standardize titles for edge creation below
+    df['normalized_title'] = df['title'].str.lower().str.strip()
+    df['normalized_title'] = df['normalized_title'].str.replace(r'[^a-z0-9\s]', '', regex=True)
 
-    # 1. Edges based on Company Profile (Your original logic)
+    edges_source, edges_target = [], []
+    
+    # edges based on Company Profile 
     for company, group in df.groupby("company_profile"):
         if company != "":
             indices = group.index.tolist()
@@ -109,10 +168,8 @@ def load_and_split_data(csv_path="data/fake_job_postings.csv"):
                     edges_source.extend([indices[i], indices[j]])
                     edges_target.extend([indices[j], indices[i]])
 
-# 2. Edges based on identical Titles
-    title_counts = df['title'].value_counts()
-    for title, group in df.groupby("title"):
-        # Lowered from 100 to 15 to prevent edge explosions on generic titles
+    title_counts = df['normalized_title'].value_counts()
+    for title, group in df.groupby("normalized_title"):
         if title != "" and 1 < title_counts[title] <= 15: 
             indices = group.index.tolist()
             for i in range(len(indices)):
@@ -121,7 +178,8 @@ def load_and_split_data(csv_path="data/fake_job_postings.csv"):
                     edges_target.extend([indices[j], indices[i]])
                     
     edges_arr = np.array([edges_source, edges_target])
-    # Remove any duplicate edges created by jobs sharing both company and title
+   
+    # remove any duplicate edges created by jobs sharing both company and title
     edges_arr = np.unique(edges_arr, axis=1)
     
     print(f"[INFO] Generated {edges_arr.shape[1]} unique edges.")
@@ -143,8 +201,9 @@ def load_and_split_data(csv_path="data/fake_job_postings.csv"):
     test_mask[test_idx]   = True
 
     print("[INFO] Stage 1 Complete.\n")
-    # Return tabular_features at the end
+    # return tabular_features at the end
     return df, edges_arr, train_mask, val_mask, test_mask, tabular_features
+
 
 def plot_training_history(history, model_name):
     print(f"\n[PROCESS] Generating training plots for {model_name}...")
@@ -167,12 +226,13 @@ def plot_training_history(history, model_name):
     plt.close()
     print(f"[INFO] Plot saved to {save_path}")
     
+
 def stratified_kfold_masks(labels, k=5, seed=42):
     skf = StratifiedKFold(n_splits=k, shuffle=True, random_state=seed)
     n = len(labels)
     
     for fold_i, (train_idx, test_idx) in enumerate(skf.split(np.zeros(n), labels)):
-        # Split the training fold further to create a validation set
+        # split the training fold further to create a validation set
         train_idx, val_idx = train_test_split(
             train_idx, test_size=0.15, stratify=labels[train_idx], random_state=seed
         )
