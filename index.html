@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <title>Scam Detector UI</title>
     <style>
-        body { font-family: helvetica; max-width: 600px; margin: 40px auto; }
+        body { font-family: helvetica; max-width: 760px; margin: 40px auto; padding: 0 12px; }
         .form-group { margin-bottom: 15px; }
         label { display: block; font-weight: bold; margin-bottom: 5px; }
         input[type="text"], textarea, select { width: 100%; padding: 8px; box-sizing: border-box; }
@@ -12,11 +13,34 @@
         #result { margin-top: 20px; font-size: 1.5em; font-weight: bold; }
         .tabular-group { display: flex; gap: 20px; }
         .tabular-item { flex: 1; }
+
+        /* explanation panel */
+        #explain { margin-top: 28px; }
+        #explain h3 { margin: 26px 0 4px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+        .hint { color: #666; font-size: 0.9em; margin: 4px 0 10px; }
+        .caveat { color: #666; font-size: 0.85em; margin-top: 28px; border-top: 1px solid #ddd; padding-top: 10px; }
+        .row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+        .row .name { width: 130px; font-weight: bold; flex: none; }
+        .row .value { width: 210px; font-size: 0.9em; flex: none; }
+        .bar { position: relative; flex: 1; height: 16px; background: #f1f1f1; border-radius: 3px; }
+        .bar .mid { position: absolute; left: 50%; top: -2px; bottom: -2px; border-left: 1px solid #888; }
+        .bar .fill { position: absolute; top: 0; bottom: 0; }
+        .toward-scam { color: #c0392b; }
+        .toward-legit { color: #1e8449; }
+        .muted { color: #888; }
+        .field-label { font-weight: bold; font-size: 0.85em; color: #555; margin: 12px 0 2px; }
+        .sentences { line-height: 1.7; }
+        .sentences span { padding: 1px 2px; border-radius: 3px; }
+        .sentences .unread { color: #aaa; text-decoration: line-through; text-decoration-color: #ccc; }
+        table.flags { border-collapse: collapse; width: 100%; font-size: 0.95em; }
+        table.flags td, table.flags th { text-align: left; padding: 5px 8px; border-bottom: 1px solid #eee; }
+        .legend span.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 4px 0 12px; }
+        svg { max-width: 100%; height: auto; background: #fafafa; border: 1px solid #eee; border-radius: 4px; }
     </style>
 </head>
 <body>
     <h2>Check Job Posting</h2>
-    
+
     <div class="form-group">
         <label>Job Title</label>
         <input type="text" id="title" placeholder="e.g. Marketing Intern">
@@ -26,7 +50,7 @@
         <label>Company Profile</label>
         <textarea id="company_profile" rows="3" placeholder="Paste company profile here..."></textarea>
     </div>
-    
+
     <div class="form-group">
         <label>Job Description</label>
         <textarea id="description" rows="5" placeholder="Paste description here..."></textarea>
@@ -69,11 +93,38 @@
     <button onclick="checkScam()">Predict</button>
 
     <div id="result"></div>
+    <div id="detail" style="margin-top: 8px; color: #555;"></div>
+    <div id="explain"></div>
 
     <script>
+        const API = 'http://127.0.0.1:8000';
+        const FIELD_LABELS = { title: "Title", company_profile: "Company profile", description: "Description",
+                               requirements: "Requirements", benefits: "Benefits" };
+        const FLAG_LABELS = { telecommuting: "Telecommuting", has_company_logo: "Has logo", has_questions: "Has questions" };
+        const RED = "192, 57, 43", GREEN = "30, 132, 73";
+
+        function el(tag, attrs = {}, ...children) {
+            const node = document.createElement(tag);
+            for (const [k, v] of Object.entries(attrs)) {
+                if (k === "class") node.className = v;
+                else if (k === "style") node.style.cssText = v;
+                else node.setAttribute(k, v);
+            }
+            for (const c of children) node.append(c);
+            return node;
+        }
+        const signed = d => (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d).toFixed(3);
+        // delta = score as written minus score with that thing changed; positive pushes toward "scam"
+        const direction = d => Math.abs(d) < 0.005 ? ["no real effect", "muted"]
+                             : d > 0 ? ["pushes toward scam", "toward-scam"] : ["pushes toward legitimate", "toward-legit"];
+
         async function checkScam() {
             const resultDiv = document.getElementById('result');
+            const detailDiv = document.getElementById('detail');
+            const explainDiv = document.getElementById('explain');
             resultDiv.innerText = "Analyzing...";
+            detailDiv.innerText = "";
+            explainDiv.replaceChildren();
 
             // Gather all 8 fields from the UI
             const payload = {
@@ -89,24 +140,190 @@
 
             // Send to FastAPI Backend
             try {
-                const response = await fetch('http://127.0.0.1:8000/predict', {
+                const response = await fetch(`${API}/predict`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                
+
                 const data = await response.json();
                 if (data.status === "success") {
-                    resultDiv.innerText = `Scam Probability: ${data.scam_probability}%`;
-                    resultDiv.style.color = data.scam_probability > 50 ? "red" : "green";
+                    // The score is the raw model output, not a calibrated probability: the model was
+                    // trained with a tuned decision threshold, so compare against that, not 50%.
+                    resultDiv.innerText = data.is_scam ? "Likely a scam" : "Likely legitimate";
+                    resultDiv.style.color = data.is_scam ? "red" : "green";
+                    detailDiv.innerText = `Model score ${data.score} (scam if ≥ ${data.threshold}). ` +
+                        `Linked to ${data.linked_postings} similar postings in the training graph.`;
                 } else {
                     resultDiv.innerText = `Error: ${data.detail}`;
                     resultDiv.style.color = "black";
+                    return;
                 }
             } catch (error) {
                 resultDiv.innerText = "Error connecting to the backend.";
                 resultDiv.style.color = "black";
+                return;
             }
+
+            // Second request: why? (re-scores the posting with parts removed, so it takes a few seconds)
+            explainDiv.append(el("p", { class: "hint" }, "Working out why — this re-scores the posting several times…"));
+            try {
+                const response = await fetch(`${API}/explain`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                explainDiv.replaceChildren();
+                if (data.status === "success") renderExplanation(explainDiv, data);
+                else explainDiv.append(el("p", { class: "hint" }, `Could not explain: ${data.detail}`));
+            } catch (error) {
+                explainDiv.replaceChildren(el("p", { class: "hint" }, "Could not load the explanation."));
+            }
+        }
+
+        function renderExplanation(root, d) {
+            root.append(el("h2", {}, "Why this result?"));
+            root.append(el("p", { class: "hint" },
+                `Each number below is the model's score for the posting as written, minus its score with one thing changed. ` +
+                `Positive pushes toward “scam”, negative toward “legitimate”. (Scam if score ≥ ${d.threshold}; this posting: ${d.score}.)`));
+            renderFields(root, d);
+            renderSentences(root, d);
+            renderFlags(root, d);
+            renderGraph(root, d.graph);
+            root.append(el("p", { class: "caveat" },
+                "These are counterfactual explanations: they show what changes the score when part of the input is removed or changed. " +
+                "They describe the model's behaviour, not a look inside the network, and removing text can also shift " +
+                `which text falls inside the model's reading window. (Computed in ${d.seconds}s.)`));
+        }
+
+        function renderFields(root, d) {
+            root.append(el("h3", {}, "Which parts of the posting drive the score"));
+            root.append(el("p", { class: "hint" }, "Each field removed in turn (everything else, including the graph links, unchanged)."));
+            const maxAbs = Math.max(0.05, ...d.fields.filter(f => !f.empty).map(f => Math.abs(f.delta)));
+            for (const f of d.fields) {
+                const row = el("div", { class: "row" }, el("div", { class: "name" }, FIELD_LABELS[f.field]));
+                if (f.empty) {
+                    row.append(el("div", { class: "bar" }, el("div", { class: "mid" })), el("div", { class: "value muted" }, "left empty"));
+                } else {
+                    const bar = el("div", { class: "bar" }, el("div", { class: "mid" }));
+                    const w = Math.min(50, Math.abs(f.delta) / maxAbs * 50);
+                    const left = f.delta > 0 ? 50 : 50 - w;
+                    bar.append(el("div", { class: "fill", style:
+                        `left:${left}%; width:${w}%; background:rgb(${f.delta > 0 ? RED : GREEN})` }));
+                    const [word, cls] = f.read_fraction === 0 ? ["not read by the model", "muted"] : direction(f.delta);
+                    const value = el("div", { class: "value " + cls }, `${signed(f.delta)} · ${word}`);
+                    if (f.read_fraction < 1) value.append(el("div", { class: "muted" },
+                        f.read_fraction === 0 ? "cut off before the model reads it"
+                                              : `only ${Math.round(f.read_fraction * 100)}% of it is read`));
+                    row.append(bar, value);
+                }
+                root.append(row);
+            }
+        }
+
+        function renderSentences(root, d) {
+            root.append(el("h3", {}, "Sentence by sentence"));
+            const rl = d.read_limit;
+            root.append(el("p", { class: "hint" },
+                `Red = this sentence pushes toward scam, green = toward legitimate (hover for the number). ` +
+                (rl.truncated
+                    ? `The model only reads the first ${rl.max_tokens} tokens of the posting; grey struck-through text comes after that and has no effect on the score.`
+                    : `The whole posting fits in the model's ${rl.max_tokens}-token reading window.`)));
+            const scored = d.sentences.filter(s => s.delta !== undefined);
+            const maxAbs = Math.max(0.02, ...scored.map(s => Math.abs(s.delta)));
+            for (const field of Object.keys(FIELD_LABELS)) {
+                const sents = d.sentences.filter(s => s.field === field);
+                if (!sents.length) continue;
+                const p = el("div", { class: "sentences" });
+                for (const s of sents) {
+                    const span = el("span", {}, s.text + " ");
+                    if (!s.read) {
+                        span.className = "unread";
+                        span.title = "beyond the model's reading window — not used";
+                    } else if (s.delta !== undefined) {
+                        const strength = Math.min(1, Math.abs(s.delta) / maxAbs) * 0.65;
+                        span.style.background = `rgba(${s.delta > 0 ? RED : GREEN}, ${strength.toFixed(2)})`;
+                        span.title = `removing this sentence changes the score by ${signed(-s.delta)} (${direction(s.delta)[0]})`;
+                    } else {
+                        span.title = "not scored (limit on sentences per explanation)";
+                    }
+                    p.append(span);
+                }
+                root.append(el("div", { class: "field-label" }, FIELD_LABELS[field]), p);
+            }
+        }
+
+        function renderFlags(root, d) {
+            root.append(el("h3", {}, "The yes/no settings"));
+            root.append(el("p", { class: "hint" }, "What the score would be if each setting were flipped."));
+            const table = el("table", { class: "flags" },
+                el("tr", {}, ...["Setting", "Currently", "Score if flipped", "Effect of current choice"].map(h => el("th", {}, h))));
+            for (const f of d.flags) {
+                const [word, cls] = direction(f.delta);
+                table.append(el("tr", {},
+                    el("td", {}, FLAG_LABELS[f.flag]),
+                    el("td", {}, f.value ? "Yes" : "No"),
+                    el("td", {}, f.score_if_flipped.toFixed(3)),
+                    el("td", { class: cls }, `${signed(f.delta)} · ${word}`)));
+            }
+            root.append(table);
+        }
+
+        function renderGraph(root, g) {
+            root.append(el("h3", {}, "The graph (similar postings)"));
+            const [word, cls] = direction(g.delta);
+            root.append(el("p", {}, "Score with graph: ", el("b", {}, g.score_with_graph.toFixed(3)),
+                " · without: ", el("b", {}, g.score_without_graph.toFixed(3)), " · ",
+                el("span", { class: cls }, `${signed(g.delta)} (${word})`)));
+            if (g.linked === 0) {
+                root.append(el("p", { class: "hint" },
+                    "This posting has the same company profile text and the same title as no posting in the training data, " +
+                    "so the graph part of the model had nothing to learn from and the result rests on the text and settings alone."));
+                return;
+            }
+            let summary = `Linked to ${g.linked} posting${g.linked === 1 ? "" : "s"} ` +
+                `(${g.by_company} with the same company profile, ${g.by_title} with the same title).`;
+            if (g.has_labels) summary += ` In the dataset, ${g.scam_neighbours} of them were scams. ` +
+                `(The model never sees these labels — only the neighbours' text.)`;
+            root.append(el("p", { class: "hint" }, summary));
+            root.append(drawGraph(g));
+            const legend = el("div", { class: "legend hint" }, "Hover a circle for its title.");
+            for (const [colour, label] of g.has_labels ? [["#c0392b", "scam"], ["#1e8449", "legitimate"]] : [["#888", "similar posting"]])
+                legend.append(el("span", { class: "dot", style: `background:${colour}` }), label);
+            if (g.linked > g.shown.length) legend.append(` · showing ${g.shown.length} of ${g.linked}`);
+            root.append(legend);
+        }
+
+        function drawGraph(g) {
+            const NS = "http://www.w3.org/2000/svg", W = 560, H = 320, cx = W / 2, cy = H / 2;
+            const svg = document.createElementNS(NS, "svg");
+            svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+            const add = (tag, attrs, text) => {
+                const n = document.createElementNS(NS, tag);
+                for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+                if (text) n.textContent = text;
+                svg.append(n); return n;
+            };
+            const n = g.shown.length, inner = Math.min(n, 12);
+            const pos = g.shown.map((_, i) => {
+                const ring = i < inner ? 0 : 1;
+                const count = ring ? n - inner : inner, k = ring ? i - inner : i;
+                const a = (k / Math.max(1, count)) * 2 * Math.PI + (ring ? Math.PI / count : 0);
+                const rx = ring ? 250 : 150, ry = ring ? 135 : 80;
+                return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)];
+            });
+            pos.forEach(([x, y]) => add("line", { x1: cx, y1: cy, x2: x, y2: y, stroke: "#ccc", "stroke-width": 1 }));
+            g.shown.forEach((nb, i) => {
+                const colour = nb.label === null ? "#888" : nb.label ? "#c0392b" : "#1e8449";
+                const c = add("circle", { cx: pos[i][0], cy: pos[i][1], r: 7, fill: colour });
+                const tip = (nb.title || "(title not available)") + " — " + nb.reasons.join(", ") +
+                    (nb.label === null ? "" : nb.label ? " — scam" : " — legitimate");
+                const t = document.createElementNS(NS, "title"); t.textContent = tip; c.append(t);
+            });
+            add("circle", { cx, cy, r: 16, fill: "#007bff" });
+            add("text", { x: cx, y: cy + 4, "text-anchor": "middle", fill: "white", "font-size": 10 }, "this");
+            return svg;
         }
     </script>
 </body>

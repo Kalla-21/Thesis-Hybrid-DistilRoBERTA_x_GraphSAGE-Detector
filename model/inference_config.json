@@ -1,0 +1,8 @@
+{
+  "threshold": 0.42653061224489797,
+  "max_length": 256,
+  "source_fold": 3,
+  "heldout_f1_of_source_fold": 0.8273972602739726,
+  "cv_mean_f1": 0.812109779518642,
+  "max_title_group": 15
+}
