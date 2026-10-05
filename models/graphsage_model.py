@@ -124,6 +124,13 @@ class DistilRobertaOnlyClassifier(nn.Module):
     def forward(self, x_text):
         return self.net(x_text)
 
+class TextTabularMLP(nn.Module):
+    def __init__(self, text_dim, tab_dim, hidden=256, dropout=0.4):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(text_dim + tab_dim, hidden), nn.ReLU(),
+                                 nn.Dropout(dropout), nn.Linear(hidden, 1))
+    def forward(self, x_text, x_tab):
+        return self.net(torch.cat([x_text, x_tab], dim=1))
 
 class GraphSAGEOnlyBaseline(nn.Module):
 

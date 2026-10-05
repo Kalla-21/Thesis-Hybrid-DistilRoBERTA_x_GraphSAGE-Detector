@@ -20,6 +20,7 @@ class DistilRobertaModule(nn.Module):
                 input_ids = batch["input_ids"].to(self.device)
                 attention_mask = batch["attention_mask"].to(self.device)
                 outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-                embeddings = outputs.last_hidden_state[:, 0, :] 
+                mask = attention_mask.unsqueeze(-1).float()
+                embeddings = (outputs.last_hidden_state * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
                 all_embeddings.append(embeddings.cpu().numpy())
         return np.vstack(all_embeddings)
