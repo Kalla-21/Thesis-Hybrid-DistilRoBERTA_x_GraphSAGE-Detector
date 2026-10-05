@@ -1,330 +1,550 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>Scam Detector UI</title>
-    <style>
-        body { font-family: helvetica; max-width: 760px; margin: 40px auto; padding: 0 12px; }
-        .form-group { margin-bottom: 15px; }
-        label { display: block; font-weight: bold; margin-bottom: 5px; }
-        input[type="text"], textarea, select { width: 100%; padding: 8px; box-sizing: border-box; }
-        button { padding: 10px 20px; background-color: #007bff; color: white; border: none; cursor: pointer; font-size: 16px;}
-        button:hover { background-color: #0056b3; }
-        #result { margin-top: 20px; font-size: 1.5em; font-weight: bold; }
-        .tabular-group { display: flex; gap: 20px; }
-        .tabular-item { flex: 1; }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enhancing the Detection of Online Recruitment Fraud</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Space+Mono&family=Black+Ops+One&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-olive: #818c6c;
+      --footer-green: #254422;
+      --accent: #e8b84f;
+      --accent-dark: #b88a1f;
+      --border: #9a9a9a;
+      --text: #111;
+      --mono: "Space Mono", "Courier New", monospace;
+      --sans: "Roboto", Arial, sans-serif;
+    }
 
-        /* explanation panel */
-        #explain { margin-top: 28px; }
-        #explain h3 { margin: 26px 0 4px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-        .hint { color: #666; font-size: 0.9em; margin: 4px 0 10px; }
-        .caveat { color: #666; font-size: 0.85em; margin-top: 28px; border-top: 1px solid #ddd; padding-top: 10px; }
-        .row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
-        .row .name { width: 130px; font-weight: bold; flex: none; }
-        .row .value { width: 210px; font-size: 0.9em; flex: none; }
-        .bar { position: relative; flex: 1; height: 16px; background: #f1f1f1; border-radius: 3px; }
-        .bar .mid { position: absolute; left: 50%; top: -2px; bottom: -2px; border-left: 1px solid #888; }
-        .bar .fill { position: absolute; top: 0; bottom: 0; }
-        .toward-scam { color: #c0392b; }
-        .toward-legit { color: #1e8449; }
-        .muted { color: #888; }
-        .field-label { font-weight: bold; font-size: 0.85em; color: #555; margin: 12px 0 2px; }
-        .sentences { line-height: 1.7; }
-        .sentences span { padding: 1px 2px; border-radius: 3px; }
-        .sentences .unread { color: #aaa; text-decoration: line-through; text-decoration-color: #ccc; }
-        table.flags { border-collapse: collapse; width: 100%; font-size: 0.95em; }
-        table.flags td, table.flags th { text-align: left; padding: 5px 8px; border-bottom: 1px solid #eee; }
-        .legend span.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 4px 0 12px; }
-        svg { max-width: 100%; height: auto; background: #fafafa; border: 1px solid #eee; border-radius: 4px; }
-    </style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--sans);
+      color: var(--text);
+      background: var(--bg-olive);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    .page {
+      flex: 1;
+      width: 100%;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 32px 50px 48px;
+    }
+
+    /* ---------- Header ---------- */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 40px;
+      margin-bottom: 28px;
+    }
+    .logo { width: 56px; height: 56px; object-fit: contain; border-radius: 50%; }
+    .title { font-size: 1.35rem; font-weight: 400; text-align: center; line-height: 1.3; }
+
+    /* ---------- Layout ---------- */
+    .content {
+      display: grid;
+      grid-template-columns: 1.55fr 1fr;
+      gap: 60px;
+      align-items: start;
+    }
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 3px 6px rgba(0, 0, 0, 0.35);
+    }
+
+    /* ---------- Outlined fields (label sits on the border) ---------- */
+    .field { position: relative; margin-bottom: 20px; }
+
+    .field > label {
+      position: absolute;
+      top: -7px;
+      left: 24px;
+      padding: 0 6px;
+      background: #fff;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      line-height: 1;
+      z-index: 1;
+    }
+
+    .field input[type="text"],
+    .field textarea {
+      display: block;
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: var(--sans);
+      font-size: 0.9rem;
+      background: #fff;
+      outline: none;
+    }
+    .field input[type="text"] { height: 38px; padding: 0 12px; }
+    .field textarea { height: 88px; resize: vertical; }
+
+    .field input:focus,
+    .field textarea:focus {
+      border-color: var(--footer-green);
+      box-shadow: 0 0 0 2px rgba(37, 68, 34, 0.2);
+    }
+
+    /* ---------- Form card ---------- */
+    .form-card { padding: 38px 48px 24px; }
+
+    .form-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-top: 8px;
+    }
+    .checks {
+      display: grid;
+      grid-template-columns: auto auto;
+      gap: 8px 40px;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+    }
+    .check { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .check input { width: 12px; height: 12px; accent-color: var(--footer-green); }
+
+    .verify-btn {
+      background: var(--accent);
+      border: none;
+      border-radius: 5px;
+      padding: 6px 28px;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      transition: filter 0.15s;
+    }
+    .verify-btn:hover { filter: brightness(0.93); }
+
+    /* ---------- Results column ---------- */
+    .results { display: flex; flex-direction: column; gap: 36px; }
+
+    .analysis-card { padding: 12px 20px 22px; }
+    .analysis-card h2 { font-family: var(--mono); font-weight: 400; font-size: 0.85rem; padding-bottom: 6px; }
+    .analysis-card hr { border: none; border-top: 1px solid var(--border); margin-bottom: 8px; }
+    .small { font-size: 0.6rem; }
+
+    /* big verdict word; states set by JS: .scam / .legit / .msg */
+    .verdict {
+      text-align: center;
+      line-height: 1;
+      margin-top: 6px;
+    }
+    .verdict.scam,
+    .verdict.legit {
+      font-family: "Black Ops One", Impact, sans-serif;
+      font-size: 4rem;
+      letter-spacing: 2px;
+    }
+    .verdict.scam  { color: var(--accent); -webkit-text-stroke: 2px var(--accent-dark); }
+    .verdict.legit { color: #3f9a4a;       -webkit-text-stroke: 2px #25602d; }
+    .verdict.msg   { font-family: var(--sans); font-size: 1rem; color: #444; padding: 14px 0; }
+
+    #detail { margin-top: 10px; font-size: 0.75rem; color: #555; text-align: center; }
+
+    .explanation-card { padding: 20px 24px 22px; }
+    .explanation-box {
+      min-height: 285px;
+      max-height: 640px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px;
+      font-size: 0.9rem;
+    }
+
+    /* ---------- Explanation content (generated by JS) ---------- */
+    #explain h2 { font-size: 1.1rem; margin-bottom: 4px; }
+    #explain h3 { margin: 22px 0 4px; border-bottom: 1px solid #ddd; padding-bottom: 4px; font-size: 0.95rem; }
+    .hint { color: #666; font-size: 0.85em; margin: 4px 0 10px; }
+    .caveat { color: #666; font-size: 0.8em; margin-top: 24px; border-top: 1px solid #ddd; padding-top: 10px; }
+    .muted { color: #888; }
+    .toward-scam { color: #c0392b; }
+    .toward-legit { color: #1e8449; }
+
+    #explain .row { display: flex; align-items: center; gap: 10px; margin: 6px 0; flex-wrap: wrap; }
+    #explain .row .name { width: 120px; font-weight: bold; flex: none; font-size: 0.85em; }
+    #explain .row .value { width: 190px; font-size: 0.8em; flex: none; }
+    .bar { position: relative; flex: 1; min-width: 80px; height: 16px; background: #f1f1f1; border-radius: 3px; }
+    .bar .mid { position: absolute; left: 50%; top: -2px; bottom: -2px; border-left: 1px solid #888; }
+    .bar .fill { position: absolute; top: 0; bottom: 0; }
+
+    .field-label { font-weight: bold; font-size: 0.8em; color: #555; margin: 12px 0 2px; }
+    .sentences { line-height: 1.7; }
+    .sentences span { padding: 1px 2px; border-radius: 3px; }
+    .sentences .unread { color: #aaa; text-decoration: line-through; text-decoration-color: #ccc; }
+
+    table.flags { border-collapse: collapse; width: 100%; font-size: 0.85em; }
+    table.flags td, table.flags th { text-align: left; padding: 5px 8px; border-bottom: 1px solid #eee; }
+
+    .legend span.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 4px 0 12px; }
+    #explain svg { max-width: 100%; height: auto; background: #fafafa; border: 1px solid #eee; border-radius: 4px; }
+
+    /* ---------- Footer ---------- */
+    .footer {
+      background: var(--footer-green);
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 18px 48px;
+    }
+    .footer-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 0.95rem; }
+    .footer-logo { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
+    .copyright { font-size: 0.7rem; opacity: 0.85; }
+
+    /* ---------- Responsive ---------- */
+    @media (max-width: 900px) {
+      .page { padding: 24px 16px 32px; }
+      .content { grid-template-columns: 1fr; gap: 32px; }
+      .header { gap: 12px; }
+      .title { font-size: 1rem; }
+      .logo { width: 40px; height: 40px; }
+      .form-card { padding: 30px 20px 20px; }
+      .form-footer { flex-direction: column; align-items: stretch; gap: 14px; }
+      .verify-btn { align-self: flex-end; }
+      .checks { grid-template-columns: 1fr; }
+      .footer { flex-direction: column; gap: 8px; padding: 16px; text-align: center; }
+    }
+  </style>
 </head>
 <body>
-    <h2>Check Job Posting</h2>
 
-    <div class="form-group">
-        <label>Job Title</label>
-        <input type="text" id="title" placeholder="e.g. Marketing Intern">
-    </div>
+  <main class="page">
 
-    <div class="form-group">
-        <label>Company Profile</label>
-        <textarea id="company_profile" rows="3" placeholder="Paste company profile here..."></textarea>
-    </div>
+    <!-- Header -->
+    <header class="header">
+      <img class="logo" src="images/logo.png" alt="Bananalynn logo">
+      <h1 class="title">Enhancing the Detection of Online Recruitment Fraud<br>using DistilRoBERTa and GraphSAGE</h1>
+      <img class="logo" src="images/logo.png" alt="Bananalynn logo">
+    </header>
 
-    <div class="form-group">
-        <label>Job Description</label>
-        <textarea id="description" rows="5" placeholder="Paste description here..."></textarea>
-    </div>
+    <div class="content">
 
-    <div class="form-group">
-        <label>Requirements</label>
-        <textarea id="requirements" rows="3" placeholder="Paste job requirements here..."></textarea>
-    </div>
+      <!-- Left: input form -->
+      <section class="card form-card">
 
-    <div class="form-group">
-        <label>Benefits</label>
-        <textarea id="benefits" rows="3" placeholder="Paste job benefits here..."></textarea>
-    </div>
-
-    <div class="form-group tabular-group">
-        <div class="tabular-item">
-            <label>Telecommuting?</label>
-            <select id="telecommuting">
-                <option value="0">No</option>
-                <option value="1">Yes</option>
-            </select>
+        <div class="field">
+          <label for="title">Job Title</label>
+          <input type="text" id="title">
         </div>
-        <div class="tabular-item">
-            <label>Has Logo?</label>
-            <select id="has_logo">
-                <option value="0">No</option>
-                <option value="1">Yes</option>
-            </select>
+
+        <div class="field">
+          <label for="company_profile">Company Profile</label>
+          <textarea id="company_profile"></textarea>
         </div>
-        <div class="tabular-item">
-            <label>Has Questions?</label>
-            <select id="has_questions">
-                <option value="0">No</option>
-                <option value="1">Yes</option>
-            </select>
+
+        <div class="field">
+          <label for="description">Job Description</label>
+          <textarea id="description"></textarea>
         </div>
+
+        <div class="field">
+          <label for="requirements">Requirements</label>
+          <textarea id="requirements"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="benefits">Benefits</label>
+          <textarea id="benefits"></textarea>
+        </div>
+
+        <div class="form-footer">
+          <div class="checks">
+            <label class="check">
+              <input type="checkbox" id="telecommuting">
+              <span>This listing has Telecommunication</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="has_logo">
+              <span>This listing has a logo</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="has_questions">
+              <span>This listing has questions</span>
+            </label>
+          </div>
+          <button type="button" class="verify-btn" onclick="checkScam()">Verify</button>
+        </div>
+
+      </section>
+
+      <!-- Right: results -->
+      <aside class="results">
+
+        <section class="card analysis-card">
+          <h2>Model’s Analysis</h2>
+          <hr>
+          <p class="small">It’s a...</p>
+          <div id="result" class="verdict msg">—</div>
+          <div id="detail"></div>
+        </section>
+
+        <section class="card explanation-card">
+          <div class="field">
+            <label>Explanation</label>
+            <div id="explain" class="explanation-box"></div>
+          </div>
+        </section>
+
+      </aside>
     </div>
+  </main>
 
-    <button onclick="checkScam()">Predict</button>
+  <footer class="footer">
+    <div class="footer-brand">
+      <img class="footer-logo" src="images/society-logo.png" alt="Bananalynn Research Society logo">
+      <span>Bananalynn Research Society</span>
+    </div>
+    <p class="copyright">@2026 Bananalynn Research Society - All rights Reserved</p>
+  </footer>
 
-    <div id="result"></div>
-    <div id="detail" style="margin-top: 8px; color: #555;"></div>
-    <div id="explain"></div>
+  <script>
+    const API = 'http://127.0.0.1:8000';
+    const FIELD_LABELS = { title: "Title", company_profile: "Company profile", description: "Description",
+                           requirements: "Requirements", benefits: "Benefits" };
+    const FLAG_LABELS = { telecommuting: "Telecommuting", has_company_logo: "Has logo", has_questions: "Has questions" };
+    const RED = "192, 57, 43", GREEN = "30, 132, 73";
 
-    <script>
-        const API = 'http://127.0.0.1:8000';
-        const FIELD_LABELS = { title: "Title", company_profile: "Company profile", description: "Description",
-                               requirements: "Requirements", benefits: "Benefits" };
-        const FLAG_LABELS = { telecommuting: "Telecommuting", has_company_logo: "Has logo", has_questions: "Has questions" };
-        const RED = "192, 57, 43", GREEN = "30, 132, 73";
+    function el(tag, attrs = {}, ...children) {
+      const node = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === "class") node.className = v;
+        else if (k === "style") node.style.cssText = v;
+        else node.setAttribute(k, v);
+      }
+      for (const c of children) node.append(c);
+      return node;
+    }
+    const signed = d => (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d).toFixed(3);
+    // delta = score as written minus score with that thing changed; positive pushes toward "scam"
+    const direction = d => Math.abs(d) < 0.005 ? ["no real effect", "muted"]
+                         : d > 0 ? ["pushes toward scam", "toward-scam"] : ["pushes toward legitimate", "toward-legit"];
 
-        function el(tag, attrs = {}, ...children) {
-            const node = document.createElement(tag);
-            for (const [k, v] of Object.entries(attrs)) {
-                if (k === "class") node.className = v;
-                else if (k === "style") node.style.cssText = v;
-                else node.setAttribute(k, v);
-            }
-            for (const c of children) node.append(c);
-            return node;
+    // state: "scam" | "legit" | "msg" (small plain text for status / errors)
+    function setResult(text, state) {
+      const resultDiv = document.getElementById('result');
+      resultDiv.innerText = text;
+      resultDiv.className = "verdict " + state;
+    }
+
+    async function checkScam() {
+      const detailDiv = document.getElementById('detail');
+      const explainDiv = document.getElementById('explain');
+      setResult("Analyzing...", "msg");
+      detailDiv.innerText = "";
+      explainDiv.replaceChildren();
+
+      // Gather all 8 fields from the UI (the three yes/no settings are checkboxes now)
+      const payload = {
+        title: document.getElementById('title').value || "",
+        company_profile: document.getElementById('company_profile').value || "",
+        description: document.getElementById('description').value || "",
+        requirements: document.getElementById('requirements').value || "",
+        benefits: document.getElementById('benefits').value || "",
+        telecommuting: document.getElementById('telecommuting').checked ? 1 : 0,
+        has_company_logo: document.getElementById('has_logo').checked ? 1 : 0,
+        has_questions: document.getElementById('has_questions').checked ? 1 : 0
+      };
+
+      // Send to FastAPI Backend
+      try {
+        const response = await fetch(`${API}/predict`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        if (data.status === "success") {
+          // The score is the raw model output, not a calibrated probability: the model was
+          // trained with a tuned decision threshold, so compare against that, not 50%.
+          setResult(data.is_scam ? "SCAM" : "LEGIT", data.is_scam ? "scam" : "legit");
+          detailDiv.innerText = `Model score ${data.score} (scam if ≥ ${data.threshold}). ` +
+            `Linked to ${data.linked_postings} similar postings in the training graph.`;
+        } else {
+          setResult(`Error: ${data.detail}`, "msg");
+          return;
         }
-        const signed = d => (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d).toFixed(3);
-        // delta = score as written minus score with that thing changed; positive pushes toward "scam"
-        const direction = d => Math.abs(d) < 0.005 ? ["no real effect", "muted"]
-                             : d > 0 ? ["pushes toward scam", "toward-scam"] : ["pushes toward legitimate", "toward-legit"];
+      } catch (error) {
+        setResult("Error connecting to the backend.", "msg");
+        return;
+      }
 
-        async function checkScam() {
-            const resultDiv = document.getElementById('result');
-            const detailDiv = document.getElementById('detail');
-            const explainDiv = document.getElementById('explain');
-            resultDiv.innerText = "Analyzing...";
-            detailDiv.innerText = "";
-            explainDiv.replaceChildren();
+      // Second request: why? (re-scores the posting with parts removed, so it takes a few seconds)
+      explainDiv.append(el("p", { class: "hint" }, "Working out why — this re-scores the posting several times…"));
+      try {
+        const response = await fetch(`${API}/explain`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        explainDiv.replaceChildren();
+        if (data.status === "success") renderExplanation(explainDiv, data);
+        else explainDiv.append(el("p", { class: "hint" }, `Could not explain: ${data.detail}`));
+      } catch (error) {
+        explainDiv.replaceChildren(el("p", { class: "hint" }, "Could not load the explanation."));
+      }
+    }
 
-            // Gather all 8 fields from the UI
-            const payload = {
-                title: document.getElementById('title').value || "",
-                company_profile: document.getElementById('company_profile').value || "",
-                description: document.getElementById('description').value || "",
-                requirements: document.getElementById('requirements').value || "",
-                benefits: document.getElementById('benefits').value || "",
-                telecommuting: parseInt(document.getElementById('telecommuting').value),
-                has_company_logo: parseInt(document.getElementById('has_logo').value),
-                has_questions: parseInt(document.getElementById('has_questions').value)
-            };
+    function renderExplanation(root, d) {
+      root.append(el("h2", {}, "Why this result?"));
+      root.append(el("p", { class: "hint" },
+        `Each number below is the model's score for the posting as written, minus its score with one thing changed. ` +
+        `Positive pushes toward “scam”, negative toward “legitimate”. (Scam if score ≥ ${d.threshold}; this posting: ${d.score}.)`));
+      renderFields(root, d);
+      renderSentences(root, d);
+      renderFlags(root, d);
+      renderGraph(root, d.graph);
+      root.append(el("p", { class: "caveat" },
+        "These are counterfactual explanations: they show what changes the score when part of the input is removed or changed. " +
+        "They describe the model's behaviour, not a look inside the network, and removing text can also shift " +
+        `which text falls inside the model's reading window. (Computed in ${d.seconds}s.)`));
+    }
 
-            // Send to FastAPI Backend
-            try {
-                const response = await fetch(`${API}/predict`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                const data = await response.json();
-                if (data.status === "success") {
-                    // The score is the raw model output, not a calibrated probability: the model was
-                    // trained with a tuned decision threshold, so compare against that, not 50%.
-                    resultDiv.innerText = data.is_scam ? "Likely a scam" : "Likely legitimate";
-                    resultDiv.style.color = data.is_scam ? "red" : "green";
-                    detailDiv.innerText = `Model score ${data.score} (scam if ≥ ${data.threshold}). ` +
-                        `Linked to ${data.linked_postings} similar postings in the training graph.`;
-                } else {
-                    resultDiv.innerText = `Error: ${data.detail}`;
-                    resultDiv.style.color = "black";
-                    return;
-                }
-            } catch (error) {
-                resultDiv.innerText = "Error connecting to the backend.";
-                resultDiv.style.color = "black";
-                return;
-            }
-
-            // Second request: why? (re-scores the posting with parts removed, so it takes a few seconds)
-            explainDiv.append(el("p", { class: "hint" }, "Working out why — this re-scores the posting several times…"));
-            try {
-                const response = await fetch(`${API}/explain`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await response.json();
-                explainDiv.replaceChildren();
-                if (data.status === "success") renderExplanation(explainDiv, data);
-                else explainDiv.append(el("p", { class: "hint" }, `Could not explain: ${data.detail}`));
-            } catch (error) {
-                explainDiv.replaceChildren(el("p", { class: "hint" }, "Could not load the explanation."));
-            }
+    function renderFields(root, d) {
+      root.append(el("h3", {}, "Which parts of the posting drive the score"));
+      root.append(el("p", { class: "hint" }, "Each field removed in turn (everything else, including the graph links, unchanged)."));
+      const maxAbs = Math.max(0.05, ...d.fields.filter(f => !f.empty).map(f => Math.abs(f.delta)));
+      for (const f of d.fields) {
+        const row = el("div", { class: "row" }, el("div", { class: "name" }, FIELD_LABELS[f.field]));
+        if (f.empty) {
+          row.append(el("div", { class: "bar" }, el("div", { class: "mid" })), el("div", { class: "value muted" }, "left empty"));
+        } else {
+          const bar = el("div", { class: "bar" }, el("div", { class: "mid" }));
+          const w = Math.min(50, Math.abs(f.delta) / maxAbs * 50);
+          const left = f.delta > 0 ? 50 : 50 - w;
+          bar.append(el("div", { class: "fill", style:
+            `left:${left}%; width:${w}%; background:rgb(${f.delta > 0 ? RED : GREEN})` }));
+          const [word, cls] = f.read_fraction === 0 ? ["not read by the model", "muted"] : direction(f.delta);
+          const value = el("div", { class: "value " + cls }, `${signed(f.delta)} · ${word}`);
+          if (f.read_fraction < 1) value.append(el("div", { class: "muted" },
+            f.read_fraction === 0 ? "cut off before the model reads it"
+                                  : `only ${Math.round(f.read_fraction * 100)}% of it is read`));
+          row.append(bar, value);
         }
+        root.append(row);
+      }
+    }
 
-        function renderExplanation(root, d) {
-            root.append(el("h2", {}, "Why this result?"));
-            root.append(el("p", { class: "hint" },
-                `Each number below is the model's score for the posting as written, minus its score with one thing changed. ` +
-                `Positive pushes toward “scam”, negative toward “legitimate”. (Scam if score ≥ ${d.threshold}; this posting: ${d.score}.)`));
-            renderFields(root, d);
-            renderSentences(root, d);
-            renderFlags(root, d);
-            renderGraph(root, d.graph);
-            root.append(el("p", { class: "caveat" },
-                "These are counterfactual explanations: they show what changes the score when part of the input is removed or changed. " +
-                "They describe the model's behaviour, not a look inside the network, and removing text can also shift " +
-                `which text falls inside the model's reading window. (Computed in ${d.seconds}s.)`));
+    function renderSentences(root, d) {
+      root.append(el("h3", {}, "Sentence by sentence"));
+      const rl = d.read_limit;
+      root.append(el("p", { class: "hint" },
+        `Red = this sentence pushes toward scam, green = toward legitimate (hover for the number). ` +
+        (rl.truncated
+          ? `The model only reads the first ${rl.max_tokens} tokens of the posting; grey struck-through text comes after that and has no effect on the score.`
+          : `The whole posting fits in the model's ${rl.max_tokens}-token reading window.`)));
+      const scored = d.sentences.filter(s => s.delta !== undefined);
+      const maxAbs = Math.max(0.02, ...scored.map(s => Math.abs(s.delta)));
+      for (const field of Object.keys(FIELD_LABELS)) {
+        const sents = d.sentences.filter(s => s.field === field);
+        if (!sents.length) continue;
+        const p = el("div", { class: "sentences" });
+        for (const s of sents) {
+          const span = el("span", {}, s.text + " ");
+          if (!s.read) {
+            span.className = "unread";
+            span.title = "beyond the model's reading window — not used";
+          } else if (s.delta !== undefined) {
+            const strength = Math.min(1, Math.abs(s.delta) / maxAbs) * 0.65;
+            span.style.background = `rgba(${s.delta > 0 ? RED : GREEN}, ${strength.toFixed(2)})`;
+            span.title = `removing this sentence changes the score by ${signed(-s.delta)} (${direction(s.delta)[0]})`;
+          } else {
+            span.title = "not scored (limit on sentences per explanation)";
+          }
+          p.append(span);
         }
+        root.append(el("div", { class: "field-label" }, FIELD_LABELS[field]), p);
+      }
+    }
 
-        function renderFields(root, d) {
-            root.append(el("h3", {}, "Which parts of the posting drive the score"));
-            root.append(el("p", { class: "hint" }, "Each field removed in turn (everything else, including the graph links, unchanged)."));
-            const maxAbs = Math.max(0.05, ...d.fields.filter(f => !f.empty).map(f => Math.abs(f.delta)));
-            for (const f of d.fields) {
-                const row = el("div", { class: "row" }, el("div", { class: "name" }, FIELD_LABELS[f.field]));
-                if (f.empty) {
-                    row.append(el("div", { class: "bar" }, el("div", { class: "mid" })), el("div", { class: "value muted" }, "left empty"));
-                } else {
-                    const bar = el("div", { class: "bar" }, el("div", { class: "mid" }));
-                    const w = Math.min(50, Math.abs(f.delta) / maxAbs * 50);
-                    const left = f.delta > 0 ? 50 : 50 - w;
-                    bar.append(el("div", { class: "fill", style:
-                        `left:${left}%; width:${w}%; background:rgb(${f.delta > 0 ? RED : GREEN})` }));
-                    const [word, cls] = f.read_fraction === 0 ? ["not read by the model", "muted"] : direction(f.delta);
-                    const value = el("div", { class: "value " + cls }, `${signed(f.delta)} · ${word}`);
-                    if (f.read_fraction < 1) value.append(el("div", { class: "muted" },
-                        f.read_fraction === 0 ? "cut off before the model reads it"
-                                              : `only ${Math.round(f.read_fraction * 100)}% of it is read`));
-                    row.append(bar, value);
-                }
-                root.append(row);
-            }
-        }
+    function renderFlags(root, d) {
+      root.append(el("h3", {}, "The yes/no settings"));
+      root.append(el("p", { class: "hint" }, "What the score would be if each setting were flipped."));
+      const table = el("table", { class: "flags" },
+        el("tr", {}, ...["Setting", "Currently", "Score if flipped", "Effect of current choice"].map(h => el("th", {}, h))));
+      for (const f of d.flags) {
+        const [word, cls] = direction(f.delta);
+        table.append(el("tr", {},
+          el("td", {}, FLAG_LABELS[f.flag]),
+          el("td", {}, f.value ? "Yes" : "No"),
+          el("td", {}, f.score_if_flipped.toFixed(3)),
+          el("td", { class: cls }, `${signed(f.delta)} · ${word}`)));
+      }
+      root.append(table);
+    }
 
-        function renderSentences(root, d) {
-            root.append(el("h3", {}, "Sentence by sentence"));
-            const rl = d.read_limit;
-            root.append(el("p", { class: "hint" },
-                `Red = this sentence pushes toward scam, green = toward legitimate (hover for the number). ` +
-                (rl.truncated
-                    ? `The model only reads the first ${rl.max_tokens} tokens of the posting; grey struck-through text comes after that and has no effect on the score.`
-                    : `The whole posting fits in the model's ${rl.max_tokens}-token reading window.`)));
-            const scored = d.sentences.filter(s => s.delta !== undefined);
-            const maxAbs = Math.max(0.02, ...scored.map(s => Math.abs(s.delta)));
-            for (const field of Object.keys(FIELD_LABELS)) {
-                const sents = d.sentences.filter(s => s.field === field);
-                if (!sents.length) continue;
-                const p = el("div", { class: "sentences" });
-                for (const s of sents) {
-                    const span = el("span", {}, s.text + " ");
-                    if (!s.read) {
-                        span.className = "unread";
-                        span.title = "beyond the model's reading window — not used";
-                    } else if (s.delta !== undefined) {
-                        const strength = Math.min(1, Math.abs(s.delta) / maxAbs) * 0.65;
-                        span.style.background = `rgba(${s.delta > 0 ? RED : GREEN}, ${strength.toFixed(2)})`;
-                        span.title = `removing this sentence changes the score by ${signed(-s.delta)} (${direction(s.delta)[0]})`;
-                    } else {
-                        span.title = "not scored (limit on sentences per explanation)";
-                    }
-                    p.append(span);
-                }
-                root.append(el("div", { class: "field-label" }, FIELD_LABELS[field]), p);
-            }
-        }
+    function renderGraph(root, g) {
+      root.append(el("h3", {}, "The graph (similar postings)"));
+      const [word, cls] = direction(g.delta);
+      root.append(el("p", {}, "Score with graph: ", el("b", {}, g.score_with_graph.toFixed(3)),
+        " · without: ", el("b", {}, g.score_without_graph.toFixed(3)), " · ",
+        el("span", { class: cls }, `${signed(g.delta)} (${word})`)));
+      if (g.linked === 0) {
+        root.append(el("p", { class: "hint" },
+          "This posting has the same company profile text and the same title as no posting in the training data, " +
+          "so the graph part of the model had nothing to learn from and the result rests on the text and settings alone."));
+        return;
+      }
+      let summary = `Linked to ${g.linked} posting${g.linked === 1 ? "" : "s"} ` +
+        `(${g.by_company} with the same company profile, ${g.by_title} with the same title).`;
+      if (g.has_labels) summary += ` In the dataset, ${g.scam_neighbours} of them were scams. ` +
+        `(The model never sees these labels — only the neighbours' text.)`;
+      root.append(el("p", { class: "hint" }, summary));
+      root.append(drawGraph(g));
+      const legend = el("div", { class: "legend hint" }, "Hover a circle for its title.");
+      for (const [colour, label] of g.has_labels ? [["#c0392b", "scam"], ["#1e8449", "legitimate"]] : [["#888", "similar posting"]])
+        legend.append(el("span", { class: "dot", style: `background:${colour}` }), label);
+      if (g.linked > g.shown.length) legend.append(` · showing ${g.shown.length} of ${g.linked}`);
+      root.append(legend);
+    }
 
-        function renderFlags(root, d) {
-            root.append(el("h3", {}, "The yes/no settings"));
-            root.append(el("p", { class: "hint" }, "What the score would be if each setting were flipped."));
-            const table = el("table", { class: "flags" },
-                el("tr", {}, ...["Setting", "Currently", "Score if flipped", "Effect of current choice"].map(h => el("th", {}, h))));
-            for (const f of d.flags) {
-                const [word, cls] = direction(f.delta);
-                table.append(el("tr", {},
-                    el("td", {}, FLAG_LABELS[f.flag]),
-                    el("td", {}, f.value ? "Yes" : "No"),
-                    el("td", {}, f.score_if_flipped.toFixed(3)),
-                    el("td", { class: cls }, `${signed(f.delta)} · ${word}`)));
-            }
-            root.append(table);
-        }
-
-        function renderGraph(root, g) {
-            root.append(el("h3", {}, "The graph (similar postings)"));
-            const [word, cls] = direction(g.delta);
-            root.append(el("p", {}, "Score with graph: ", el("b", {}, g.score_with_graph.toFixed(3)),
-                " · without: ", el("b", {}, g.score_without_graph.toFixed(3)), " · ",
-                el("span", { class: cls }, `${signed(g.delta)} (${word})`)));
-            if (g.linked === 0) {
-                root.append(el("p", { class: "hint" },
-                    "This posting has the same company profile text and the same title as no posting in the training data, " +
-                    "so the graph part of the model had nothing to learn from and the result rests on the text and settings alone."));
-                return;
-            }
-            let summary = `Linked to ${g.linked} posting${g.linked === 1 ? "" : "s"} ` +
-                `(${g.by_company} with the same company profile, ${g.by_title} with the same title).`;
-            if (g.has_labels) summary += ` In the dataset, ${g.scam_neighbours} of them were scams. ` +
-                `(The model never sees these labels — only the neighbours' text.)`;
-            root.append(el("p", { class: "hint" }, summary));
-            root.append(drawGraph(g));
-            const legend = el("div", { class: "legend hint" }, "Hover a circle for its title.");
-            for (const [colour, label] of g.has_labels ? [["#c0392b", "scam"], ["#1e8449", "legitimate"]] : [["#888", "similar posting"]])
-                legend.append(el("span", { class: "dot", style: `background:${colour}` }), label);
-            if (g.linked > g.shown.length) legend.append(` · showing ${g.shown.length} of ${g.linked}`);
-            root.append(legend);
-        }
-
-        function drawGraph(g) {
-            const NS = "http://www.w3.org/2000/svg", W = 560, H = 320, cx = W / 2, cy = H / 2;
-            const svg = document.createElementNS(NS, "svg");
-            svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-            const add = (tag, attrs, text) => {
-                const n = document.createElementNS(NS, tag);
-                for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
-                if (text) n.textContent = text;
-                svg.append(n); return n;
-            };
-            const n = g.shown.length, inner = Math.min(n, 12);
-            const pos = g.shown.map((_, i) => {
-                const ring = i < inner ? 0 : 1;
-                const count = ring ? n - inner : inner, k = ring ? i - inner : i;
-                const a = (k / Math.max(1, count)) * 2 * Math.PI + (ring ? Math.PI / count : 0);
-                const rx = ring ? 250 : 150, ry = ring ? 135 : 80;
-                return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)];
-            });
-            pos.forEach(([x, y]) => add("line", { x1: cx, y1: cy, x2: x, y2: y, stroke: "#ccc", "stroke-width": 1 }));
-            g.shown.forEach((nb, i) => {
-                const colour = nb.label === null ? "#888" : nb.label ? "#c0392b" : "#1e8449";
-                const c = add("circle", { cx: pos[i][0], cy: pos[i][1], r: 7, fill: colour });
-                const tip = (nb.title || "(title not available)") + " — " + nb.reasons.join(", ") +
-                    (nb.label === null ? "" : nb.label ? " — scam" : " — legitimate");
-                const t = document.createElementNS(NS, "title"); t.textContent = tip; c.append(t);
-            });
-            add("circle", { cx, cy, r: 16, fill: "#007bff" });
-            add("text", { x: cx, y: cy + 4, "text-anchor": "middle", fill: "white", "font-size": 10 }, "this");
-            return svg;
-        }
-    </script>
+    function drawGraph(g) {
+      const NS = "http://www.w3.org/2000/svg", W = 560, H = 320, cx = W / 2, cy = H / 2;
+      const svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      const add = (tag, attrs, text) => {
+        const n = document.createElementNS(NS, tag);
+        for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+        if (text) n.textContent = text;
+        svg.append(n); return n;
+      };
+      const n = g.shown.length, inner = Math.min(n, 12);
+      const pos = g.shown.map((_, i) => {
+        const ring = i < inner ? 0 : 1;
+        const count = ring ? n - inner : inner, k = ring ? i - inner : i;
+        const a = (k / Math.max(1, count)) * 2 * Math.PI + (ring ? Math.PI / count : 0);
+        const rx = ring ? 250 : 150, ry = ring ? 135 : 80;
+        return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)];
+      });
+      pos.forEach(([x, y]) => add("line", { x1: cx, y1: cy, x2: x, y2: y, stroke: "#ccc", "stroke-width": 1 }));
+      g.shown.forEach((nb, i) => {
+        const colour = nb.label === null ? "#888" : nb.label ? "#c0392b" : "#1e8449";
+        const c = add("circle", { cx: pos[i][0], cy: pos[i][1], r: 7, fill: colour });
+        const tip = (nb.title || "(title not available)") + " — " + nb.reasons.join(", ") +
+          (nb.label === null ? "" : nb.label ? " — scam" : " — legitimate");
+        const t = document.createElementNS(NS, "title"); t.textContent = tip; c.append(t);
+      });
+      add("circle", { cx, cy, r: 16, fill: "#007bff" });
+      add("text", { x: cx, y: cy + 4, "text-anchor": "middle", fill: "white", "font-size": 10 }, "this");
+      return svg;
+    }
+  </script>
 </body>
 </html>
