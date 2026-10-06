@@ -26,28 +26,35 @@ class CrossAttentionFusion(nn.Module): # now uses graphsage nodes to use as 3-le
         self.pool_query = nn.Parameter(torch.randn(1, 1, attn_dim))
 
     def forward(self, h_text, graph_hops, x_tab):
-        N = h_text.shape[0]
+            N = h_text.shape[0]
 
-        t = self.w_t(h_text).unsqueeze(1)                                   
-        g_seq = torch.stack(
-            [proj(h) for proj, h in zip(self.w_g, graph_hops)], dim=1
-        )                                                                  
+            # 1. Project to Attention Space
+            t = self.w_t(h_text).unsqueeze(1)                                   
+            g_seq = torch.stack(
+                [proj(h) for proj, h in zip(self.w_g, graph_hops)], dim=1
+            )                                                                   
 
-        t_attend_g, attn_weights_t2g = self.attn_t2g(query=t, key=g_seq, value=g_seq)
-        t_out = self.norm_t(t_attend_g.squeeze(1) + t.squeeze(1))           
+            # 2. Compute Attention
+            t_attend_g, attn_weights_t2g = self.attn_t2g(query=t, key=g_seq, value=g_seq)
+            t_out = self.norm_t(t_attend_g.squeeze(1) + t.squeeze(1))           
 
-        pool_q = self.pool_query.expand(N, -1, -1)                          
-        g_pooled, attn_weights_pool = self.attn_pool(query=pool_q, key=g_seq, value=g_seq)
-        g_out = self.norm_g(g_pooled.squeeze(1))                           
+            pool_q = self.pool_query.expand(N, -1, -1)                          
+            g_pooled, attn_weights_pool = self.attn_pool(query=pool_q, key=g_seq, value=g_seq)
+            g_out = self.norm_g(g_pooled.squeeze(1))                            
 
-        fused = torch.cat([t_out, g_out, x_tab], dim=1)
+            # 3. The Residual Concat Trick:
+            # Instead of just [t_out, g_out, x_tab], we append them alongside 
+            # the raw h_text and the final graph hop (graph_hops[-1]) 
+            # to guarantee we retain all base information.
+            fused = torch.cat([h_text, graph_hops[-1], t_out, g_out, x_tab], dim=1)
 
-        self.last_attn_weights = {"t2g": attn_weights_t2g, "graph_pool": attn_weights_pool}
-        return fused
+            self.last_attn_weights = {"t2g": attn_weights_t2g, "graph_pool": attn_weights_pool}
+            return fused
 
     @property
     def output_dim(self):
-        return self.attn_dim * 2  # t_out + g_out, both attn_dim
+            # Raw Text (768) + Raw Graph (128) + Attn Text (768) + Attn Graph (768)
+            return 768 + 128 + self.attn_dim + self.attn_dim    
 
 
 class FraudDetectionGraphSAGE(nn.Module):

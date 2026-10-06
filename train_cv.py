@@ -24,9 +24,9 @@ from models.graphsage_model import (
 CV_CONFIG = {
     "k_folds":         5,
     "seed":            42,
-    "split":           "group",   
-    "n_seeds":         3,
-    "pos_weight_cap":  10.0,
+    "split":           "random",   
+    "n_seeds":         1,
+    "pos_weight_cap":  3.5,
     "lr":              0.00075,
     "epochs":          200,
     "patience":        25,
@@ -35,8 +35,12 @@ CV_CONFIG = {
     "lr_factor":       0.5,
     "threshold_steps": 80,
     "threshold_min":   0.02,
-    "beta":            2.0,
+    "beta":            1.0,
     "gamma":           2.0,
+    "tab_mode":        "paper",
+    "edge_types":      ("company", "title"),
+    "cap_cliques":     False,
+    "tag": "",
 }
 CONDITIONS = ["distilroberta_only", "text_tabular", "graphsage_only",
               "late_concat", "cross_attention"]
@@ -150,7 +154,7 @@ def run():
 
     emb_job = get_embeddings(df, "job_text", 512, "outputs/emb_job_512.npy")
     emb_co = get_embeddings(df, "company_profile", 256, "outputs/emb_company_256.npy")
-    embeddings = np.hstack([emb_job, emb_co])
+    embeddings = get_embeddings(df, "full_text", 512, "outputs/emb_full_512.npy")
 
     x_text = torch.tensor(embeddings, dtype=torch.float).to(GNN_DEVICE)
     x_tab = torch.tensor(tabular_features, dtype=torch.float).to(GNN_DEVICE)
@@ -212,7 +216,7 @@ def run():
                 )
 
         # save after every fold so a crash doesn't lose finished folds
-        out_path = f"outputs/cv_results_{CV_CONFIG['split']}.json"
+        out_path = f"outputs/cv_results_{CV_CONFIG['split']}{CV_CONFIG['tag']}_seed{CV_CONFIG['seed']}.json"
         with open(out_path, "w") as f:
             json.dump({"config": CV_CONFIG, "timestamp": time.ctime(), "results": results}, f, indent=2)
 
