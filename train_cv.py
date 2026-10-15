@@ -9,6 +9,7 @@ from sklearn.metrics import (
     f1_score, fbeta_score, recall_score, precision_score,
     accuracy_score, matthews_corrcoef, average_precision_score,
 )
+from torchgen import model
 
 from losses import FocalLoss
 from utils import (
@@ -24,7 +25,7 @@ from models.graphsage_model import (
 CV_CONFIG = {
     "k_folds":         5,
     "seed":            42,
-    "split":           "random",   
+    "split":           "random",  # run "group" first, then "random" for comparison (no need to delete the outputs of the first run)
     "n_seeds":         1,
     "pos_weight_cap":  3.5,
     "lr":              0.00075,
@@ -181,16 +182,23 @@ def run():
 
         def run_cond(make_model, fwd):
             ms, first = [], None
+            final_model = None  # <-- 1. Create a tracker
             for s in range(CV_CONFIG["n_seeds"]):
                 set_seed(CV_CONFIG["seed"] + 100 * s + fold_i)
+                
+                m_obj = make_model()  
+                
                 m, th, pr = train_one_model(
-                    make_model(), fwd, y, train_mask, val_mask, test_mask,
+                    m_obj, fwd, y, train_mask, val_mask, test_mask,
                     pos_weight, CV_CONFIG, GNN_DEVICE,
                 )
                 ms.append(m)
                 if first is None:
                     first = (th, pr)
-            return {k: float(np.mean([m[k] for m in ms])) for k in ms[0]}, first
+                
+                final_model = m_obj 
+                
+            return {k: float(np.mean([m[k] for m in ms])) for k in ms[0]}, first, final_model
 
         conds = {
             "distilroberta_only": (lambda: DistilRobertaOnlyClassifier(text_dim=td),
@@ -207,13 +215,17 @@ def run():
         }
 
         for name, (mk, fwd) in conds.items():
-            avg, (thresh, probs) = run_cond(mk, fwd)
+            avg, (thresh, probs), trained_model = run_cond(mk, fwd)
+            
             results[name].append(avg)
             print(f"[{name:18s}] F1={avg['f1']:.4f} F2={avg['f2']:.4f} PR-AUC={avg['pr_auc']:.4f}")
+            
             if name == "cross_attention":
                 results.setdefault("connectivity", []).append(
                     connectivity_breakdown(probs, thresh, y, test_mask, edge_index)
                 )
+                save_path = f"outputs/cross_attention_fold_{fold_i + 1}.pt"
+                torch.save(trained_model.state_dict(), save_path)
 
         # save after every fold so a crash doesn't lose finished folds
         out_path = f"outputs/cv_results_{CV_CONFIG['split']}{CV_CONFIG['tag']}_seed{CV_CONFIG['seed']}.json"
@@ -228,7 +240,6 @@ def run():
             vals = [r[m] for r in results[cond]]
             parts.append(f"{m}={np.mean(vals):.3f}±{np.std(vals):.3f}")
         print(f"{cond:20s} " + "  ".join(parts))
-
-
+        
 if __name__ == "__main__":
     run()
