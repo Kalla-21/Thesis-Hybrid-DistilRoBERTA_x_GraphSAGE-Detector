@@ -1,10 +1,20 @@
-    fastapi
-    uvicorn
-    pydantic
-    torch
-    numpy
-    scikit-learn
-    torch_geometric
-    transformers
-    tqdm
-    requests
+fastapi
+uvicorn
+pydantic
+torch
+numpy
+scikit-learn
+torch_geometric
+transformers
+tqdm
+requests
+torch
+torch-geometric
+transformers
+pandas
+numpy
+scikit-learn
+scipy
+matplotlib
+seaborn
+tqdm
