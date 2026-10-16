@@ -29,10 +29,21 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # --- MODEL SETUP ---
 TEXT_DIM = 768
-TABULAR_DIM = 3
 DEVICE = "cpu"
 
 print("Loading models...")
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+_assets = np.load(os.path.join(HERE, "model", "graph_assets.npz"))
+N = _assets["embeddings"].shape[0]
+X_TEXT = torch.from_numpy(_assets["embeddings"].astype(np.float32))
+X_TAB = torch.from_numpy(_assets["tabular"])
+EDGE_INDEX = torch.from_numpy(_assets["edge_index"].astype(np.int64))
+COMPANY_HASH = _assets["company_hash"]
+TITLE_HASH = _assets["title_hash"]
+
+TABULAR_DIM = X_TAB.shape[1]  # Read dynamic dimension from graph assets (11)
+
 scam_model = FraudDetectionGraphSAGE(text_dim=TEXT_DIM, tabular_dim=TABULAR_DIM, fusion_mode="cross_attention")
 scam_model.load_state_dict(torch.load(os.path.join(HERE, "model", "best_cross_attention_model.pt"),
                                       map_location=torch.device('cpu'), weights_only=True))
@@ -41,16 +52,18 @@ scam_model.eval()
 # Load the DistilRoBERTa translator
 text_encoder = DistilRobertaModule(DEVICE)
 
-# --- TRAINING GRAPH ---
-# The model was trained transductively on one big graph of the dataset's postings (edges = same
-# company profile, or same title when it appears 2-15 times). A new posting is added to that graph
-# as one extra node, linked the same way, so the GraphSAGE branch sees real neighbours.
-# Exported by build_graph_assets.py.
+# --- INFERENCE CONFIG ---
 with open(os.path.join(HERE, "model", "inference_config.json")) as f:
     CONFIG = json.load(f)
 THRESHOLD = CONFIG["threshold"]
 MAX_LENGTH = CONFIG["max_length"]
 MAX_TITLE_GROUP = CONFIG["max_title_group"]
+
+# --- TRAINING GRAPH ---
+# The model was trained transductively on one big graph of the dataset's postings (edges = same
+# company profile, or same title when it appears 2-15 times). A new posting is added to that graph
+# as one extra node, linked the same way, so the GraphSAGE branch sees real neighbours.
+# Exported by build_graph_assets.py.
 
 _assets = np.load(os.path.join(HERE, "model", "graph_assets.npz"))
 N = _assets["embeddings"].shape[0]
@@ -145,8 +158,14 @@ def build_text(fields: dict) -> str:
 
 
 def tab_tensor(job) -> torch.Tensor:
-    return torch.tensor([job.telecommuting, job.has_company_logo, job.has_questions], dtype=torch.float)
-
+    # 3 core user inputs from UI
+    flags = [float(job.telecommuting), float(job.has_company_logo), float(job.has_questions)]
+    
+    # Pad remaining tabular features with 0.0 if TABULAR_DIM > 3
+    if len(flags) < TABULAR_DIM:
+        flags += [0.0] * (TABULAR_DIM - len(flags))
+        
+    return torch.tensor(flags[:TABULAR_DIM], dtype=torch.float)
 
 # --- DATA SCHEMA (User Experience) ---
 class JobInput(BaseModel):

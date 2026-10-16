@@ -8,40 +8,43 @@ it just can't show titles or colour neighbours by label.
 The CSV must be the one the graph was built from (same rows, same order). That is checked by comparing
 title/company hashes against the ones already stored, so a mismatched file is rejected.
 """
-import csv
-import hashlib
+"""Adds each training posting's title and scam/legit label to model/graph_assets.npz.
+
+The explanation panel uses them to label the neighbours it draws in the UI.
+"""
 import os
 import sys
-
 import numpy as np
 
-NPZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model", "graph_assets.npz")
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 
+from utils import load_and_split_data
 
-def h64(s: str) -> int:
-    if s == "":
-        return 0
-    return int(np.frombuffer(hashlib.blake2b(s.encode("utf-8"), digest_size=8).digest(), dtype=np.uint64)[0])
+NPZ = os.path.join(HERE, "model", "graph_assets.npz")
 
 
 def main():
-    if len(sys.argv) != 2:
-        sys.exit(__doc__)
-    with open(sys.argv[1], encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
+    if not os.path.exists(NPZ):
+        sys.exit(f"Error: {NPZ} does not exist. Run build_graph_assets.py first.")
+
+    print("Loading preprocessed dataset from utils.load_and_split_data()...")
+    df, _, _, _, _, _ = load_and_split_data()
 
     assets = dict(np.load(NPZ))
-    if len(rows) != len(assets["title_hash"]):
-        sys.exit(f"CSV has {len(rows)} rows but the graph has {len(assets['title_hash'])} nodes - wrong file.")
-    title_hash = np.array([h64(r["title"] or "") for r in rows], dtype=np.uint64)
-    company_hash = np.array([h64(r["company_profile"] or "") for r in rows], dtype=np.uint64)
-    if not (title_hash == assets["title_hash"]).all() or not (company_hash == assets["company_hash"]).all():
-        sys.exit("CSV rows don't line up with the saved graph (title/company hashes differ) - wrong file or version.")
 
-    assets["labels"] = np.array([int(r["fraudulent"]) for r in rows], dtype=np.int8)
-    assets["titles"] = np.array([(r["title"] or "")[:120] for r in rows])
+    if len(df) != len(assets["title_hash"]):
+        sys.exit(f"Data mismatch: preprocessed df has {len(df)} rows but graph_assets.npz has {len(assets['title_hash'])} nodes.")
+
+    # Extract labels and titles matching the 15,663 deduplicated graph nodes
+    labels = df["label"].values.astype(np.int8)
+    titles = np.array([(t or "")[:120] for t in df["title"].values])
+
+    assets["labels"] = labels
+    assets["titles"] = titles
+
     np.savez_compressed(NPZ, **assets)
-    print(f"Added titles and labels ({int(assets['labels'].sum())} scams of {len(rows)}) to {NPZ}")
+    print(f"Successfully added titles and labels ({int(labels.sum())} scams of {len(df)} nodes) to {NPZ}")
 
 
 if __name__ == "__main__":

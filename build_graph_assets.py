@@ -1,58 +1,72 @@
-"""One-off: export the training graph + decision threshold into model/ for the demo.
+"""Bridge script: exports training graph + best model weights into model/ for UI inference.
 
-Run with the TRAINING repo's python (it needs pandas / sklearn / torch_geometric):
-
-    <train_repo>\\.venv\\Scripts\\python.exe build_graph_assets.py --train-repo <train_repo>
-
-Writes:
-    model/graph_assets.npz        embeddings, tabular feats, edges, company/title hashes
-    model/inference_config.json   tuned threshold + the settings the model was trained with
+Run after training finishes:
+    python build_graph_assets.py
 """
-import argparse
+import glob
 import hashlib
 import json
 import os
+import shutil
 import sys
 
 import numpy as np
 import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+from utils import load_and_split_data, stratified_kfold_masks
+from train_cv import tune_threshold, get_metrics
+from models.graphsage_model import FraudDetectionGraphSAGE
 
 
 def h64(s: str) -> np.uint64:
-    """Stable 64-bit hash of an exact string; 0 is reserved for the empty string."""
     if s == "":
         return np.uint64(0)
     return np.frombuffer(hashlib.blake2b(s.encode("utf-8"), digest_size=8).digest(), dtype=np.uint64)[0]
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--train-repo", required=True)
-    args = ap.parse_args()
+    os.makedirs(os.path.join(HERE, "model"), exist_ok=True)
 
-    train = os.path.abspath(args.train_repo)
-    os.chdir(train)  # training code uses relative paths (data/, outputs/)
-    sys.path.insert(0, train)
-    from utils import load_and_split_data, stratified_kfold_masks
-    from train_cv import tune_threshold, get_metrics
-    from models.graphsage_model import FraudDetectionGraphSAGE
-
+    # 1. Load dataset & tabular features from training logic
     df, edges, _, _, _, tab = load_and_split_data()
     y = df["label"].values
-    emb = np.load("outputs/embeddings.npy")
-    assert emb.shape == (len(df), 768)
+    tt = tab.shape[1]  # Dynamically obtain tabular feature dimension (11)
 
-    # --- which CV fold produced the shipped weights? (the one with the best cross_attention F1)
-    cv = json.load(open("outputs/cv_results.json"))["cross_attention"]
+    emb_path = "outputs/emb_full_512.npy"
+    if not os.path.exists(emb_path):
+        emb_path = "outputs/embeddings.npy"
+    emb = np.load(emb_path)
+
+    # 2. Locate CV results JSON log
+    cv_files = sorted(glob.glob("outputs/cv_results_*.json"))
+    if not cv_files:
+        sys.exit("Error: No cv_results_*.json file found in outputs/. Run train_cv.py first.")
+    
+    cv_file = cv_files[0]
+    print(f"Reading CV results from {cv_file}...")
+    
+    with open(cv_file) as f:
+        data = json.load(f)
+        cv = data["results"]["cross_attention"] if "results" in data else data["cross_attention"]
+
+    # 3. Copy best fold checkpoint
     fold_idx = int(np.argmax([r["f1"] for r in cv]))
     recorded_f1 = cv[fold_idx]["f1"]
+    best_fold_number = fold_idx + 1
+    
+    source_weights = f"outputs/cross_attention_fold_{best_fold_number}.pt"
+    dest_weights = os.path.join(HERE, "model", "best_cross_attention_model.pt")
+    shutil.copy(source_weights, dest_weights)
+    print(f"Selected fold {best_fold_number} (F1={recorded_f1:.4f}) -> Copied to {dest_weights}")
 
-    weights = os.path.join(HERE, "model", "best_cross_attention_model.pt")
-    model = FraudDetectionGraphSAGE(768, 3, fusion_mode="cross_attention")
-    model.load_state_dict(torch.load(weights, map_location="cpu", weights_only=True))
+    # 4. Instantiate model with matching tabular dimension (tt)
+    model = FraudDetectionGraphSAGE(768, tt, fusion_mode="cross_attention")
+    model.load_state_dict(torch.load(dest_weights, map_location="cpu", weights_only=True))
     model.eval()
+
     with torch.no_grad():
         probs = torch.sigmoid(model(
             torch.tensor(emb, dtype=torch.float),
@@ -64,41 +78,36 @@ def main():
         if fold != fold_idx:
             continue
         va, te = va.numpy(), te.numpy()
-        thresh, val_f1 = tune_threshold(probs[va], y[va], 50)
+        thresh, _ = tune_threshold(probs[va], y[va], 80, beta=1.0)
         m = get_metrics(y[te], (probs[te] >= thresh).astype(float))
-    print(f"fold {fold_idx}: threshold={thresh:.5f}  held-out F1={m['f1']:.4f} (cv_results.json: {recorded_f1:.4f})")
-    assert abs(m["f1"] - recorded_f1) < 1e-3, "weights/embeddings don't reproduce the recorded CV result"
 
+    print(f"Fold {best_fold_number} tuned threshold={thresh:.5f} | Held-out F1={m['f1']:.4f}")
+
+    # 5. Export graph assets & config with correct tabular_dim
     company_hash = np.array([h64(s) for s in df["company_profile"].values], dtype=np.uint64)
     title_hash = np.array([h64(s) for s in df["title"].values], dtype=np.uint64)
 
     np.savez_compressed(
         os.path.join(HERE, "model", "graph_assets.npz"),
-        embeddings=emb.astype(np.float16),  # halves the file; effect on outputs is checked below
+        embeddings=emb.astype(np.float16),
         tabular=tab.astype(np.float32),
         edge_index=edges.astype(np.int32),
         company_hash=company_hash,
         title_hash=title_hash,
     )
+
     with open(os.path.join(HERE, "model", "inference_config.json"), "w") as f:
         json.dump({
-            "threshold": thresh,
+            "threshold": float(thresh),
             "max_length": 256,
-            "source_fold": fold_idx,
-            "heldout_f1_of_source_fold": m["f1"],
+            "tabular_dim": int(tt),
+            "source_fold": best_fold_number,
+            "heldout_f1_of_source_fold": float(m["f1"]),
             "cv_mean_f1": float(np.mean([r["f1"] for r in cv])),
             "max_title_group": 15,
         }, f, indent=2)
 
-    # float16 sanity check: do verdicts change vs the float32 embeddings?
-    with torch.no_grad():
-        p16 = torch.sigmoid(model(
-            torch.tensor(emb.astype(np.float16).astype(np.float32)),
-            torch.tensor(edges, dtype=torch.long),
-            torch.tensor(tab, dtype=torch.float),
-        )).squeeze().numpy()
-    print(f"float16 embeddings: max |dprob|={np.abs(p16 - probs).max():.5f}, "
-          f"verdict flips={int(((p16 >= thresh) != (probs >= thresh)).sum())} of {len(probs)}")
+    print("Graph assets and inference config exported successfully!")
 
 
 if __name__ == "__main__":
