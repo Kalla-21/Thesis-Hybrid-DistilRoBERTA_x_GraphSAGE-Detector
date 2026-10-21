@@ -1,155 +1,122 @@
-#complementary_analysis.py
+# complementary_analysis.py
 import os
+import sys
 import json
 import numpy as np
 import torch
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from torch.utils.data import DataLoader
 
-from utils import DEVICE, GNN_DEVICE, JobTextDataset, set_seed, load_and_split_data
-from models.distilroberta_encoder import DistilRobertaModule
-from models.graphsage_model import (
-    FraudDetectionGraphSAGE, DistilRobertaOnlyClassifier, GraphSAGEOnlyBaseline,
-)
-from train_cv import train_one_model, CV_CONFIG
+from utils import GNN_DEVICE, set_seed, stratified_kfold_masks
+from train_cv import (train_one_model, CV_CONFIG, make_conditions,
+                      compute_pos_weight, load_inputs)
 
-SEED = 42
+NEEDED = ["distilroberta_only", "graphsage_only", "late_concat", "cross_attention"]
 
 
-def run():
-    set_seed(SEED)
+def run(split):
     os.makedirs("outputs", exist_ok=True)
+    seed = CV_CONFIG["seed"]
+    set_seed(seed)
 
-    df, edges_arr, train_mask, val_mask, test_mask, tabular_features = load_and_split_data()
-    labels_arr = df["label"].values
-
-    emb_path = "outputs/embeddings.npy"
-    if os.path.exists(emb_path):
-        print("[INFO] Loading cached text embeddings...")
-        embeddings = np.load(emb_path)
-    else:
-        text_module = DistilRobertaModule(DEVICE)
-        full_dataset = JobTextDataset(df["full_text"].values, df["label"].values, text_module.tokenizer)
-        full_loader = DataLoader(full_dataset, batch_size=16, shuffle=False)
-        embeddings = text_module.extract_embeddings(full_loader)
-        np.save(emb_path, embeddings)
-
-    x_text = torch.tensor(embeddings, dtype=torch.float).to(GNN_DEVICE)
-    x_tab = torch.tensor(tabular_features, dtype=torch.float).to(GNN_DEVICE)
-    y = torch.tensor(labels_arr, dtype=torch.float).to(GNN_DEVICE)
-    edge_index = torch.tensor(edges_arr, dtype=torch.long).to(GNN_DEVICE)
-    num_nodes = x_text.shape[0]
-
-    train_mask = train_mask.to(GNN_DEVICE)
-    val_mask = val_mask.to(GNN_DEVICE)
-    test_mask = test_mask.to(GNN_DEVICE)
-
-    num_licit = (y[train_mask] == 0).sum().item()
-    num_scam = (y[train_mask] == 1).sum().item()
-    pos_weight = torch.tensor(
-        [min(num_licit / max(num_scam, 1), CV_CONFIG["pos_weight_cap"])], dtype=torch.float
-    ).to(GNN_DEVICE)
-
-    preds = {}
-
-    print("[PROCESS] Training DistilRoBERTa-only...")
-    set_seed(SEED)
-    model = DistilRobertaOnlyClassifier(text_dim=x_text.shape[1])
-    _, thresh, probs = train_one_model(
-        model, lambda m: m(x_text), y, train_mask, val_mask, test_mask,
-        pos_weight, CV_CONFIG, GNN_DEVICE,
-    )
-    preds["distilroberta_only"] = (probs >= thresh).astype(int)
-
-    print("[PROCESS] Training GraphSAGE-only...")
-    set_seed(SEED)
-    model = GraphSAGEOnlyBaseline(num_nodes=num_nodes, rand_dim=x_text.shape[1], seed=SEED)
-    _, thresh, probs = train_one_model(
-        model, lambda m: m(edge_index), y, train_mask, val_mask, test_mask,
-        pos_weight, CV_CONFIG, GNN_DEVICE,
-    )
-    preds["graphsage_only"] = (probs >= thresh).astype(int)
-
-    print("[PROCESS] Training cross-attention hybrid...")
-    set_seed(SEED)
-    model = FraudDetectionGraphSAGE(
-        text_dim=x_text.shape[1], tabular_dim=x_tab.shape[1], fusion_mode="cross_attention"
-    )
-    _, thresh, probs = train_one_model(
-        model, lambda m: m(x_text, edge_index, x_tab), y, train_mask, val_mask, test_mask,
-        pos_weight, CV_CONFIG, GNN_DEVICE,
-    )
-    preds["cross_attention"] = (probs >= thresh).astype(int)
-
-    # --- Restrict to actually-fraudulent test listings ---
-    test_idx = test_mask.cpu().numpy().nonzero()[0]
+    df, x_text, x_tab, y, edge_index = load_inputs()
     y_np = y.cpu().numpy()
-    fraud_idx = test_idx[y_np[test_idx] == 1]
-    print(f"\n[INFO] {len(fraud_idx)} fraudulent listings in the test set.")
+    labels_arr = df["label"].values
+    groups = df["group_id"].values if split == "group" else None
 
-    text_hit = preds["distilroberta_only"][fraud_idx] == 1
-    graph_hit = preds["graphsage_only"][fraud_idx] == 1
-    hybrid_hit = preds["cross_attention"][fraud_idx] == 1
+    tot = dict(n_fraud=0, neither=0, text_only=0, graph_only=0, both=0,
+               hybrid_of_neither=0, late_of_neither=0,
+               text_hits=0, graph_hits=0, late_hits=0, hybrid_hits=0,
+               n_legit=0, fp_text=0, fp_graph=0, fp_late=0, fp_hybrid=0)
+    per_fold = []
 
-    neither = ~text_hit & ~graph_hit
-    text_only = text_hit & ~graph_hit
-    graph_only = ~text_hit & graph_hit
-    both = text_hit & graph_hit
+    for fold_i, tr, va, te in stratified_kfold_masks(labels_arr, k=CV_CONFIG["k_folds"], seed=seed, groups=groups):
+        tr, va, te = tr.to(GNN_DEVICE), va.to(GNN_DEVICE), te.to(GNN_DEVICE)
+        pos_weight = compute_pos_weight(y, tr, CV_CONFIG["pos_weight_cap"]).to(GNN_DEVICE)
+        conds = make_conditions(x_text, x_tab, edge_index, seed)
 
-    report = {
-        "n_fraud_in_test": int(len(fraud_idx)),
-        "caught_by_neither_standalone": int(neither.sum()),
-        "caught_by_text_only": int(text_only.sum()),
-        "caught_by_graph_only": int(graph_only.sum()),
-        "caught_by_both_standalone": int(both.sum()),
-        "of_text_misses_graph_catches": int((~text_hit & graph_hit).sum()),
-        "of_graph_misses_text_catches": int((~graph_hit & text_hit).sum()),
-        "hybrid_recovers_of_neither_caught": {
-            "denominator": int(neither.sum()),
-            "hybrid_catches": int((hybrid_hit & neither).sum()),
-        },
-        "hybrid_overall_recall_on_fraud": float(hybrid_hit.mean()),
-        "distilroberta_only_recall_on_fraud": float(text_hit.mean()),
-        "graphsage_only_recall_on_fraud": float(graph_hit.mean()),
-    }
+        preds = {}
+        for name in NEEDED:
+            mk, fwd = conds[name]
+            set_seed(seed + fold_i)   # same seed as the first model seed in train_cv.py
+            _, th, pr = train_one_model(mk(), fwd, y, tr, va, te, pos_weight, CV_CONFIG, GNN_DEVICE)
+            preds[name] = (pr >= th).astype(int)
+            print(f"[fold {fold_i + 1}] trained {name}")
 
-    with open("outputs/complementarity_report.json", "w") as f:
+        te_np = te.cpu().numpy()
+        fraud_idx = np.where(te_np & (y_np == 1))[0]
+        legit_idx = np.where(te_np & (y_np == 0))[0]
+
+        dr = preds["distilroberta_only"][fraud_idx] == 1
+        gs = preds["graphsage_only"][fraud_idx] == 1
+        lc = preds["late_concat"][fraud_idx] == 1
+        ca = preds["cross_attention"][fraud_idx] == 1
+        neither = ~dr & ~gs
+
+        # false alarms: legitimate test listings each model flags as fraud
+        fp = {k: int(preds[k][legit_idx].sum()) for k in NEEDED}
+
+        row = dict(fold=fold_i + 1, n_fraud=len(fraud_idx), neither=int(neither.sum()),
+                   text_only=int((dr & ~gs).sum()), graph_only=int((~dr & gs).sum()), both=int((dr & gs).sum()),
+                   hybrid_of_neither=int((ca & neither).sum()), late_of_neither=int((lc & neither).sum()),
+                   text_hits=int(dr.sum()), graph_hits=int(gs.sum()), late_hits=int(lc.sum()), hybrid_hits=int(ca.sum()),
+                   n_legit=len(legit_idx), fp_text=fp["distilroberta_only"], fp_graph=fp["graphsage_only"],
+                   fp_late=fp["late_concat"], fp_hybrid=fp["cross_attention"])
+        per_fold.append(row)
+        for k in tot:
+            tot[k] += row[k]
+
+    n = tot["n_fraud"]
+
+    # cost of the detections: precision and false-alarm rate, pooled over folds
+    cost = {}
+    for name, hits_key, fp_key in [("distilroberta_only", "text_hits", "fp_text"),
+                                   ("graphsage_only", "graph_hits", "fp_graph"),
+                                   ("late_concat", "late_hits", "fp_late"),
+                                   ("cross_attention", "hybrid_hits", "fp_hybrid")]:
+        cost[name] = {"false_alarms": tot[fp_key],
+                      "precision": tot[hits_key] / max(tot[hits_key] + tot[fp_key], 1),
+                      "false_alarm_rate": tot[fp_key] / max(tot["n_legit"], 1)}
+
+    report = {"split": split, "pooled": tot, "per_fold": per_fold, "cost": cost,
+              "recall_distilroberta_only": tot["text_hits"] / n,
+              "recall_graphsage_only": tot["graph_hits"] / n,
+              "recall_late_concat": tot["late_hits"] / n,
+              "recall_cross_attention": tot["hybrid_hits"] / n}
+    with open(f"outputs/complementarity_report_{split}.json", "w") as f:
         json.dump(report, f, indent=2)
 
-    print("\n===== COMPLEMENTARITY BREAKDOWN (fraudulent test listings only) =====")
-    print(f"Caught by neither standalone model : {report['caught_by_neither_standalone']}")
-    print(f"Caught by DistilRoBERTa only        : {report['caught_by_text_only']}")
-    print(f"Caught by GraphSAGE only             : {report['caught_by_graph_only']}")
-    print(f"Caught by both standalone models     : {report['caught_by_both_standalone']}")
-    n_neither = report["hybrid_recovers_of_neither_caught"]["denominator"]
-    n_recovered = report["hybrid_recovers_of_neither_caught"]["hybrid_catches"]
-    if n_neither > 0:
-        print(f"\nOf the {n_neither} cases BOTH standalone models missed, "
-              f"the hybrid catches {n_recovered} "
-              f"({100 * n_recovered / n_neither:.1f}%).")
-    else:
-        print("\nNo cases were missed by both standalone models in this split -- "
-              "re-check on a split/fold with more test-set fraud cases, or run "
-              "this analysis per-fold across the CV splits for a sturdier count.")
-    print(f"\nRecall on fraud -- DistilRoBERTa-only: {report['distilroberta_only_recall_on_fraud']:.3f} | "
-          f"GraphSAGE-only: {report['graphsage_only_recall_on_fraud']:.3f} | "
-          f"Hybrid: {report['hybrid_overall_recall_on_fraud']:.3f}")
+    print(f"\n===== COMPLEMENTARITY ({split} split, pooled over folds; {n} fraudulent test listings) =====")
+    print(f"Caught by neither standalone : {tot['neither']}")
+    print(f"Caught by text only          : {tot['text_only']}")
+    print(f"Caught by graph only         : {tot['graph_only']}")
+    print(f"Caught by both               : {tot['both']}")
+    if tot["neither"]:
+        print(f"Of the {tot['neither']} missed by both: cross-attention catches {tot['hybrid_of_neither']} "
+              f"({100 * tot['hybrid_of_neither'] / tot['neither']:.1f}%), late concat catches {tot['late_of_neither']} "
+              f"({100 * tot['late_of_neither'] / tot['neither']:.1f}%)")
+    print(f"Recall: text {report['recall_distilroberta_only']:.3f} | graph {report['recall_graphsage_only']:.3f} | "
+          f"late {report['recall_late_concat']:.3f} | cross-attn {report['recall_cross_attention']:.3f}")
+    print("Cost (pooled): precision and false alarms among legitimate listings")
+    for name, v in cost.items():
+        print(f"  {name:18s} precision {v['precision']:.3f} | false alarms {v['false_alarms']} "
+              f"({100 * v['false_alarm_rate']:.2f}% of {tot['n_legit']} legitimate)")
 
-    # --- Simple bar chart of the breakdown ---
     labels = ["Neither\nstandalone", "Text\nonly", "Graph\nonly", "Both\nstandalone"]
-    counts = [neither.sum(), text_only.sum(), graph_only.sum(), both.sum()]
+    counts = [tot["neither"], tot["text_only"], tot["graph_only"], tot["both"]]
     plt.figure(figsize=(6, 5))
     bars = plt.bar(labels, counts, color=["#c0392b", "#2980b9", "#27ae60", "#8e44ad"])
-    for bar, count in zip(bars, counts):
-        plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
-                  str(int(count)), ha="center")
-    plt.ylabel("Number of fraudulent test listings")
-    plt.title("Which model catches which fraud cases\n(standalone DistilRoBERTa vs. standalone GraphSAGE)")
+    for b, c in zip(bars, counts):
+        plt.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.3, str(int(c)), ha="center")
+    plt.ylabel("Fraudulent test listings (pooled over folds)")
+    plt.title(f"Which standalone model catches which fraud ({split} split)")
     plt.tight_layout()
-    plt.savefig("outputs/complementarity_breakdown.png")
+    plt.savefig(f"outputs/complementarity_breakdown_{split}.png")
     plt.close()
-    print("\n[INFO] Saved outputs/complementarity_breakdown.png")
 
 
 if __name__ == "__main__":
-    run()
+    split = sys.argv[1] if len(sys.argv) > 1 else CV_CONFIG["split"]
+    assert split in ("random", "group")
+    run(split)

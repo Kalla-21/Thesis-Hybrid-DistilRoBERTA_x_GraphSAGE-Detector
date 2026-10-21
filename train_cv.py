@@ -1,5 +1,6 @@
 # train_cv.py
 import os
+import sys
 import json
 import time
 import numpy as np
@@ -9,7 +10,6 @@ from sklearn.metrics import (
     f1_score, fbeta_score, recall_score, precision_score,
     accuracy_score, matthews_corrcoef, average_precision_score,
 )
-from torchgen import model
 
 from losses import FocalLoss
 from utils import (
@@ -25,9 +25,9 @@ from models.graphsage_model import (
 CV_CONFIG = {
     "k_folds":         5,
     "seed":            42,
-    "split":           "random",  # run "group" first, then "random" for comparison (no need to delete the outputs of the first run)
-    "n_seeds":         1,
-    "pos_weight_cap":  3.5,
+    "split":           "random",  
+    "n_seeds":         3,          
+    "pos_weight_cap":  3.5,        
     "lr":              0.00075,
     "epochs":          200,
     "patience":        25,
@@ -38,10 +38,7 @@ CV_CONFIG = {
     "threshold_min":   0.02,
     "beta":            1.0,
     "gamma":           2.0,
-    "tab_mode":        "paper",
-    "edge_types":      ("company", "title"),
-    "cap_cliques":     False,
-    "tag": "",
+    "tag":             "",
 }
 CONDITIONS = ["distilroberta_only", "text_tabular", "graphsage_only",
               "late_concat", "cross_attention"]
@@ -70,6 +67,30 @@ def get_metrics(y_true, y_pred, probs=None):
     if probs is not None:
         m["pr_auc"] = average_precision_score(y_true, probs)
     return m
+
+
+def compute_pos_weight(y, train_mask, cap):
+    num_licit = (y[train_mask] == 0).sum().item()
+    num_scam = (y[train_mask] == 1).sum().item()
+    return torch.tensor([min(num_licit / max(num_scam, 1), cap)], dtype=torch.float)
+
+
+def make_conditions(x_text, x_tab, edge_index, seed):
+    """[change 5] single source of truth for the five models, shared with complementary_analysis.py."""
+    td, tt = x_text.shape[1], x_tab.shape[1]
+    num_nodes = x_text.shape[0]
+    return {
+        "distilroberta_only": (lambda: DistilRobertaOnlyClassifier(text_dim=td),
+                               lambda m: m(x_text)),
+        "text_tabular":       (lambda: TextTabularMLP(td, tt),
+                               lambda m: m(x_text, x_tab)),
+        "graphsage_only":     (lambda: GraphSAGEOnlyBaseline(num_nodes=num_nodes, rand_dim=td, seed=seed),
+                               lambda m: m(edge_index)),
+        "late_concat":        (lambda: FraudDetectionGraphSAGE(td, tt, fusion_mode="concat"),
+                               lambda m: m(x_text, edge_index, x_tab)),
+        "cross_attention":    (lambda: FraudDetectionGraphSAGE(td, tt, fusion_mode="cross_attention"),
+                               lambda m: m(x_text, edge_index, x_tab)),
+    }
 
 
 def train_one_model(model, forward_fn, y, train_mask, val_mask, test_mask,
@@ -146,100 +167,91 @@ def get_embeddings(df, col, max_len, path):
     return e
 
 
+def load_inputs():
+    """Shared by train_cv.py and complementary_analysis.py so both use identical inputs."""
+    df, edges_arr, _, _, _, tabular_features = load_and_split_data()
+    embeddings = get_embeddings(df, "full_text", 512, "outputs/emb_full_512.npy")   # [change 2] emb_job / emb_co removed
+    x_text = torch.tensor(embeddings, dtype=torch.float).to(GNN_DEVICE)
+    x_tab = torch.tensor(tabular_features, dtype=torch.float).to(GNN_DEVICE)
+    y = torch.tensor(df["label"].values, dtype=torch.float).to(GNN_DEVICE)
+    edge_index = torch.tensor(edges_arr, dtype=torch.long).to(GNN_DEVICE)
+    return df, x_text, x_tab, y, edge_index
+
+
 def run():
     set_seed(CV_CONFIG["seed"])
     os.makedirs("outputs", exist_ok=True)
 
-    df, edges_arr, _, _, _, tabular_features = load_and_split_data()
+    df, x_text, x_tab, y, edge_index = load_inputs()
     labels_arr = df["label"].values
-
-    emb_job = get_embeddings(df, "job_text", 512, "outputs/emb_job_512.npy")
-    emb_co = get_embeddings(df, "company_profile", 256, "outputs/emb_company_256.npy")
-    embeddings = get_embeddings(df, "full_text", 512, "outputs/emb_full_512.npy")
-
-    x_text = torch.tensor(embeddings, dtype=torch.float).to(GNN_DEVICE)
-    x_tab = torch.tensor(tabular_features, dtype=torch.float).to(GNN_DEVICE)
-    y = torch.tensor(labels_arr, dtype=torch.float).to(GNN_DEVICE)
-    edge_index = torch.tensor(edges_arr, dtype=torch.long).to(GNN_DEVICE)
-    num_nodes = x_text.shape[0]
-    td, tt = x_text.shape[1], x_tab.shape[1]
+    split = CV_CONFIG["split"]
+    groups = df["group_id"].values if split == "group" else None
 
     results = {cond: [] for cond in CONDITIONS}
-    groups = df["group_id"].values if CV_CONFIG["split"] == "group" else None
+    out_path = f"outputs/cv_results_{split}{CV_CONFIG['tag']}_seed{CV_CONFIG['seed']}.json"
 
     for fold_i, train_mask, val_mask, test_mask in stratified_kfold_masks(
         labels_arr, k=CV_CONFIG["k_folds"], seed=CV_CONFIG["seed"], groups=groups
     ):
-        print(f"\n===== FOLD {fold_i + 1}/{CV_CONFIG['k_folds']} ({CV_CONFIG['split']} split) =====")
+        print(f"\n===== FOLD {fold_i + 1}/{CV_CONFIG['k_folds']} ({split} split) =====")
         train_mask = train_mask.to(GNN_DEVICE)
         val_mask = val_mask.to(GNN_DEVICE)
         test_mask = test_mask.to(GNN_DEVICE)
+        pos_weight = compute_pos_weight(y, train_mask, CV_CONFIG["pos_weight_cap"]).to(GNN_DEVICE)
 
-        num_licit = (y[train_mask] == 0).sum().item()
-        num_scam = (y[train_mask] == 1).sum().item()
-        capped = min(num_licit / max(num_scam, 1), CV_CONFIG["pos_weight_cap"])
-        pos_weight = torch.tensor([capped], dtype=torch.float).to(GNN_DEVICE)
-
-        def run_cond(make_model, fwd):
-            ms, first = [], None
-            final_model = None  # <-- 1. Create a tracker
-            for s in range(CV_CONFIG["n_seeds"]):
-                set_seed(CV_CONFIG["seed"] + 100 * s + fold_i)
-                
-                m_obj = make_model()  
-                
-                m, th, pr = train_one_model(
-                    m_obj, fwd, y, train_mask, val_mask, test_mask,
-                    pos_weight, CV_CONFIG, GNN_DEVICE,
-                )
-                ms.append(m)
-                if first is None:
-                    first = (th, pr)
-                
-                final_model = m_obj 
-                
-            return {k: float(np.mean([m[k] for m in ms])) for k in ms[0]}, first, final_model
-
-        conds = {
-            "distilroberta_only": (lambda: DistilRobertaOnlyClassifier(text_dim=td),
-                                   lambda m: m(x_text)),
-            "text_tabular":       (lambda: TextTabularMLP(td, tt),
-                                   lambda m: m(x_text, x_tab)),
-            "graphsage_only":     (lambda: GraphSAGEOnlyBaseline(num_nodes=num_nodes, rand_dim=td,
-                                                                 seed=CV_CONFIG["seed"]),
-                                   lambda m: m(edge_index)),
-            "late_concat":        (lambda: FraudDetectionGraphSAGE(td, tt, fusion_mode="concat"),
-                                   lambda m: m(x_text, edge_index, x_tab)),
-            "cross_attention":    (lambda: FraudDetectionGraphSAGE(td, tt, fusion_mode="cross_attention"),
-                                   lambda m: m(x_text, edge_index, x_tab)),
-        }
+        conds = make_conditions(x_text, x_tab, edge_index, CV_CONFIG["seed"])
+        saved = {}   # first-seed probs/threshold per condition, for PR curves / test cases / confusion matrices
 
         for name, (mk, fwd) in conds.items():
-            avg, (thresh, probs), trained_model = run_cond(mk, fwd)
-            
+            ms, first, first_model = [], None, None
+            for s in range(CV_CONFIG["n_seeds"]):
+                set_seed(CV_CONFIG["seed"] + 100 * s + fold_i)
+                m_obj = mk()
+                m, th, pr = train_one_model(m_obj, fwd, y, train_mask, val_mask, test_mask,
+                                            pos_weight, CV_CONFIG, GNN_DEVICE)
+                ms.append(m)
+                if first is None:
+                    first, first_model = (th, pr), m_obj
+            avg = {k: float(np.mean([m[k] for m in ms])) for k in ms[0]}
+            thresh, probs = first
+
             results[name].append(avg)
+            saved[name + "_probs"] = probs.astype(np.float32)
+            saved[name + "_thresh"] = np.float32(thresh)
             print(f"[{name:18s}] F1={avg['f1']:.4f} F2={avg['f2']:.4f} PR-AUC={avg['pr_auc']:.4f}")
-            
+
             if name == "cross_attention":
+                # NOTE: connectivity counts use the FIRST seed's probabilities and threshold
                 results.setdefault("connectivity", []).append(
                     connectivity_breakdown(probs, thresh, y, test_mask, edge_index)
                 )
-                save_path = f"outputs/cross_attention_fold_{fold_i + 1}.pt"
-                torch.save(trained_model.state_dict(), save_path)
+                # [fix] split in the filename so the group run does not overwrite the random run
+                torch.save(first_model.state_dict(), f"outputs/cross_attention_{split}_fold_{fold_i + 1}.pt")
+
+        np.savez_compressed(
+            f"outputs/probs_{split}_seed{CV_CONFIG['seed']}_fold{fold_i + 1}.npz",
+            y=y.cpu().numpy(), test_mask=test_mask.cpu().numpy(),
+            val_mask=val_mask.cpu().numpy(), train_mask=train_mask.cpu().numpy(), **saved,
+        )
 
         # save after every fold so a crash doesn't lose finished folds
-        out_path = f"outputs/cv_results_{CV_CONFIG['split']}{CV_CONFIG['tag']}_seed{CV_CONFIG['seed']}.json"
         with open(out_path, "w") as f:
             json.dump({"config": CV_CONFIG, "timestamp": time.ctime(), "results": results}, f, indent=2)
 
     print("\n===== SUMMARY (mean ± std across folds) =====")
-    summary_metrics = ["f1", "f2", "precision", "recall", "pr_auc", "mcc"]
     for cond in CONDITIONS:
         parts = []
-        for m in summary_metrics:
+        for m in ["f1", "f2", "precision", "recall", "pr_auc", "mcc"]:
             vals = [r[m] for r in results[cond]]
             parts.append(f"{m}={np.mean(vals):.3f}±{np.std(vals):.3f}")
         print(f"{cond:20s} " + "  ".join(parts))
-        
+
+
 if __name__ == "__main__":
+    # [change 7] python train_cv.py group      /  python train_cv.py random 43
+    if len(sys.argv) > 1:
+        CV_CONFIG["split"] = sys.argv[1]
+    if len(sys.argv) > 2:
+        CV_CONFIG["seed"] = int(sys.argv[2])
+    assert CV_CONFIG["split"] in ("random", "group"), "split must be 'random' or 'group'"
     run()

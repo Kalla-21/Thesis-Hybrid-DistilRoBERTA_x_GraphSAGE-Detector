@@ -2,22 +2,23 @@
 import torch
 import torch.nn as nn
 from torch_geometric.nn import SAGEConv
- 
- 
-class CrossAttentionFusion(nn.Module): # now uses graphsage nodes to use as 3-length key-value pair for cross-attention
+
+
+class CrossAttentionFusion(nn.Module):
 
     def __init__(self, text_dim=768, graph_dims=(256, 256, 128), attn_dim=128,
                  num_heads=4, dropout=0.1):
         super().__init__()
+        self.text_dim = text_dim                 # [change 3] stored so output_dim is not hard-coded
+        self.graph_out = graph_dims[-1]          # [change 3] final-hop width (h3)
         self.attn_dim = attn_dim
         self.w_t = nn.Linear(text_dim, attn_dim)
         self.w_g = nn.ModuleList([nn.Linear(d, attn_dim) for d in graph_dims])
 
         self.attn_t2g = nn.MultiheadAttention(attn_dim, num_heads=num_heads,
-                                               dropout=dropout, batch_first=True)
-        # used for pooling the graph sequence down to one vector
+                                              dropout=dropout, batch_first=True)
         self.attn_pool = nn.MultiheadAttention(attn_dim, num_heads=num_heads,
-                                                dropout=dropout, batch_first=True)
+                                               dropout=dropout, batch_first=True)
 
         self.norm_t = nn.LayerNorm(attn_dim)
         self.norm_g = nn.LayerNorm(attn_dim)
@@ -26,40 +27,35 @@ class CrossAttentionFusion(nn.Module): # now uses graphsage nodes to use as 3-le
         self.pool_query = nn.Parameter(torch.randn(1, 1, attn_dim))
 
     def forward(self, h_text, graph_hops, x_tab):
-            N = h_text.shape[0]
+        N = h_text.shape[0]
 
-            # 1. Project to Attention Space
-            t = self.w_t(h_text).unsqueeze(1)                                   
-            g_seq = torch.stack(
-                [proj(h) for proj, h in zip(self.w_g, graph_hops)], dim=1
-            )                                                                   
+        # 1. project to attention space
+        t = self.w_t(h_text).unsqueeze(1)
+        g_seq = torch.stack([proj(h) for proj, h in zip(self.w_g, graph_hops)], dim=1)
 
-            # 2. Compute Attention
-            t_attend_g, attn_weights_t2g = self.attn_t2g(query=t, key=g_seq, value=g_seq)
-            t_out = self.norm_t(t_attend_g.squeeze(1) + t.squeeze(1))           
+        # 2. attention
+        t_attend_g, attn_weights_t2g = self.attn_t2g(query=t, key=g_seq, value=g_seq)
+        t_out = self.norm_t(t_attend_g.squeeze(1) + t.squeeze(1))
 
-            pool_q = self.pool_query.expand(N, -1, -1)                          
-            g_pooled, attn_weights_pool = self.attn_pool(query=pool_q, key=g_seq, value=g_seq)
-            g_out = self.norm_g(g_pooled.squeeze(1))                            
+        pool_q = self.pool_query.expand(N, -1, -1)
+        g_pooled, attn_weights_pool = self.attn_pool(query=pool_q, key=g_seq, value=g_seq)
+        g_out = self.norm_g(g_pooled.squeeze(1))
 
-            # 3. The Residual Concat Trick:
-            # Instead of just [t_out, g_out, x_tab], we append them alongside 
-            # the raw h_text and the final graph hop (graph_hops[-1]) 
-            # to guarantee we retain all base information.
-            fused = torch.cat([h_text, graph_hops[-1], t_out, g_out, x_tab], dim=1)
+        # 3. keep the raw text and final-hop vectors next to the attended ones
+        fused = torch.cat([h_text, graph_hops[-1], t_out, g_out, x_tab], dim=1)
 
-            self.last_attn_weights = {"t2g": attn_weights_t2g, "graph_pool": attn_weights_pool}
-            return fused
+        self.last_attn_weights = {"t2g": attn_weights_t2g, "graph_pool": attn_weights_pool}
+        return fused
 
     @property
     def output_dim(self):
-            # Raw Text (768) + Raw Graph (128) + Attn Text (768) + Attn Graph (768)
-            return 768 + 128 + self.attn_dim + self.attn_dim    
+        # raw text + final-hop graph + attended text + pooled graph (tabular is added by the caller)
+        return self.text_dim + self.graph_out + 2 * self.attn_dim   # [change 3]
 
 
 class FraudDetectionGraphSAGE(nn.Module):
 
-    def __init__(self, text_dim=768, tabular_dim=3, hidden_channels=256,
+    def __init__(self, text_dim=768, tabular_dim=11, hidden_channels=256,   # [change 4] default 11
                  out_channels=128, attn_dim=128, dropout=0.4,
                  fusion_mode="cross_attention"):
         super().__init__()
@@ -69,7 +65,6 @@ class FraudDetectionGraphSAGE(nn.Module):
         self.fusion_mode = fusion_mode
         self.dropout_rate = dropout
 
-        # The gnn takes embeddings
         self.conv1 = SAGEConv(text_dim, hidden_channels)
         self.conv2 = SAGEConv(hidden_channels, hidden_channels)
         self.conv3 = SAGEConv(hidden_channels, out_channels)
@@ -84,12 +79,12 @@ class FraudDetectionGraphSAGE(nn.Module):
         else:
             self.fusion = CrossAttentionFusion(
                 text_dim=text_dim,
-                graph_dims=(hidden_channels, hidden_channels, out_channels),  # conv1, conv2, conv3 dims
+                graph_dims=(hidden_channels, hidden_channels, out_channels),
                 attn_dim=attn_dim,
             )
             fused_dim = self.fusion.output_dim + tabular_dim
 
-        # Same MLP classifier head for both fusion conditions
+        # same MLP head for both fusion conditions
         self.classifier = nn.Sequential(
             nn.Linear(fused_dim, 256),
             nn.ReLU(),
@@ -112,7 +107,6 @@ class FraudDetectionGraphSAGE(nn.Module):
         if self.fusion_mode == "concat":
             fused = torch.cat([x_text, h3, x_tab], dim=1)
         else:
-            # pass all 3 hop-representations as the graph key/value sequence
             fused = self.fusion(x_text, [h1, h2, h3], x_tab)
 
         return self.classifier(fused)
@@ -131,13 +125,16 @@ class DistilRobertaOnlyClassifier(nn.Module):
     def forward(self, x_text):
         return self.net(x_text)
 
+
 class TextTabularMLP(nn.Module):
     def __init__(self, text_dim, tab_dim, hidden=256, dropout=0.4):
         super().__init__()
         self.net = nn.Sequential(nn.Linear(text_dim + tab_dim, hidden), nn.ReLU(),
                                  nn.Dropout(dropout), nn.Linear(hidden, 1))
+
     def forward(self, x_text, x_tab):
         return self.net(torch.cat([x_text, x_tab], dim=1))
+
 
 class GraphSAGEOnlyBaseline(nn.Module):
 
@@ -159,7 +156,6 @@ class GraphSAGEOnlyBaseline(nn.Module):
         self.bn2 = nn.BatchNorm1d(hidden_channels)
         self.bn3 = nn.BatchNorm1d(out_channels)
 
-    
         self.classifier = nn.Sequential(
             nn.Linear(out_channels, 64),
             nn.ReLU(),
