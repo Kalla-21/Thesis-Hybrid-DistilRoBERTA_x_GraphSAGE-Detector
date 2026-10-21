@@ -1,9 +1,10 @@
 {
-  "threshold": 0.6660759493670886,
+  "threshold": 0.13139240506329114,
   "max_length": 256,
   "tabular_dim": 11,
+  "split_type": "group",
   "source_fold": 4,
-  "heldout_f1_of_source_fold": 0.7457627118644068,
+  "heldout_f1_of_source_fold": 0.6713286713286714,
   "cv_mean_f1": 0.5244686028927469,
   "max_title_group": 15
 }
