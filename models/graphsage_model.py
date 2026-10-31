@@ -9,8 +9,8 @@ class CrossAttentionFusion(nn.Module):
     def __init__(self, text_dim=768, graph_dims=(256, 256, 128), attn_dim=128,
                  num_heads=4, dropout=0.1):
         super().__init__()
-        self.text_dim = text_dim                 # [change 3] stored so output_dim is not hard-coded
-        self.graph_out = graph_dims[-1]          # [change 3] final-hop width (h3)
+        self.text_dim = text_dim                 
+        self.graph_out = graph_dims[-1]          
         self.attn_dim = attn_dim
         self.w_t = nn.Linear(text_dim, attn_dim)
         self.w_g = nn.ModuleList([nn.Linear(d, attn_dim) for d in graph_dims])

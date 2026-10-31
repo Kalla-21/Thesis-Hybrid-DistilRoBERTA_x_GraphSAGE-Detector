@@ -1,0 +1,58 @@
+{
+  "run": "pipeline",
+  "started": "2026-10-31T20:11:55",
+  "finished": "2026-10-31T20:23:46",
+  "status": "ok",
+  "duration_s": 711.7,
+  "summary": {},
+  "events": [
+    {
+      "t": 414.03,
+      "stage": "step",
+      "message": "cross-validation: random split, seed 42",
+      "command": "train_cv.py random 42",
+      "exit_code": 0,
+      "seconds": 414.0
+    },
+    {
+      "t": 678.07,
+      "stage": "step",
+      "message": "cross-validation: group split, seed 42",
+      "command": "train_cv.py group 42",
+      "exit_code": 0,
+      "seconds": 264.0
+    },
+    {
+      "t": 679.86,
+      "stage": "step",
+      "message": "paired statistical tests",
+      "command": "stats_test.py",
+      "exit_code": 0,
+      "seconds": 1.8
+    },
+    {
+      "t": 681.35,
+      "stage": "step",
+      "message": "complementarity: random split",
+      "command": "complementary_analysis.py random 42",
+      "exit_code": 0,
+      "seconds": 1.5
+    },
+    {
+      "t": 682.29,
+      "stage": "step",
+      "message": "complementarity: group split",
+      "command": "complementary_analysis.py group 42",
+      "exit_code": 0,
+      "seconds": 0.9
+    },
+    {
+      "t": 711.72,
+      "stage": "step",
+      "message": "build final model (evelynn.pt)",
+      "command": "build_model.py",
+      "exit_code": 0,
+      "seconds": 29.4
+    }
+  ]
+}

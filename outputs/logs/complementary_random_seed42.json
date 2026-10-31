@@ -1,0 +1,18 @@
+{
+  "run": "complementary_random_seed42",
+  "started": "2026-10-31T20:23:16",
+  "finished": "2026-10-31T20:23:16",
+  "status": "ok",
+  "duration_s": 0.2,
+  "summary": {
+    "report_file": "outputs\\complementarity_report_random.json",
+    "n_fraud": 705,
+    "recall": {
+      "distilroberta_only": 0.4921985815602837,
+      "graphsage_only": 0.5390070921985816,
+      "late_concat": 0.7120567375886525,
+      "cross_attention": 0.700709219858156
+    }
+  },
+  "events": []
+}

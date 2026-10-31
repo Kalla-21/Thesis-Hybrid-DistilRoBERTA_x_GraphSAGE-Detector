@@ -1,0 +1,241 @@
+{
+  "alpha": 0.05,
+  "splits": {
+    "random": {
+      "cv_run_files": 1,
+      "n_paired_values": 5,
+      "tests": [
+        {
+          "hypothesis": "H1: hybrid vs DistilRoBERTa-only",
+          "metric": "f1",
+          "baseline": "distilroberta_only",
+          "mean_diff": 0.23226855168238475,
+          "ci95": [
+            0.21153455311106406,
+            0.25300255025370544
+          ],
+          "test": "paired t-test",
+          "p": 6.367639296913181e-06,
+          "p_corrected": 3.784428330774535e-05,
+          "shapiro_p": 0.9442892018440864,
+          "primary_wins": "5/5",
+          "decision": "reject H0",
+          "wrong_direction": false,
+          "corrected_test_disagrees": false
+        },
+        {
+          "hypothesis": "H1: hybrid vs DistilRoBERTa-only",
+          "metric": "mcc",
+          "baseline": "distilroberta_only",
+          "mean_diff": 0.24014597523155654,
+          "ci95": [
+            0.2152528430514422,
+            0.26503910741167086
+          ],
+          "test": "paired t-test",
+          "p": 1.1550128558140327e-05,
+          "p_corrected": 6.841015359689965e-05,
+          "shapiro_p": 0.5024431937130419,
+          "primary_wins": "5/5",
+          "decision": "reject H0",
+          "wrong_direction": false,
+          "corrected_test_disagrees": false
+        },
+        {
+          "hypothesis": "H2: hybrid vs GraphSAGE-only",
+          "metric": "f1",
+          "baseline": "graphsage_only",
+          "mean_diff": 0.20336157310341055,
+          "ci95": [
+            0.15468872960473437,
+            0.2520344166020867
+          ],
+          "test": "paired t-test",
+          "p": 0.00031553777003624436,
+          "p_corrected": 0.001768649572754512,
+          "shapiro_p": 0.2126782500418859,
+          "primary_wins": "5/5",
+          "decision": "reject H0",
+          "wrong_direction": false,
+          "corrected_test_disagrees": false
+        },
+        {
+          "hypothesis": "H2: hybrid vs GraphSAGE-only",
+          "metric": "mcc",
+          "baseline": "graphsage_only",
+          "mean_diff": 0.18804250287329874,
+          "ci95": [
+            0.13866364735671982,
+            0.23742135838987766
+          ],
+          "test": "paired t-test",
+          "p": 0.00045276169600929077,
+          "p_corrected": 0.002504586509298355,
+          "shapiro_p": 0.8485861980163303,
+          "primary_wins": "5/5",
+          "decision": "reject H0",
+          "wrong_direction": false,
+          "corrected_test_disagrees": false
+        },
+        {
+          "hypothesis": "H3: cross-attention vs late fusion",
+          "metric": "f1",
+          "baseline": "late_concat",
+          "mean_diff": -0.03117087298584511,
+          "ci95": [
+            -0.05225275513883672,
+            -0.010088990832853497
+          ],
+          "test": "paired t-test",
+          "p": 0.014790672643539827,
+          "p_corrected": 0.05863419841789025,
+          "shapiro_p": 0.6954535983588825,
+          "primary_wins": "0/5",
+          "decision": "reject H0",
+          "wrong_direction": true,
+          "corrected_test_disagrees": true
+        },
+        {
+          "hypothesis": "H3: cross-attention vs late fusion",
+          "metric": "mcc",
+          "baseline": "late_concat",
+          "mean_diff": -0.03565310035030136,
+          "ci95": [
+            -0.056136318368849,
+            -0.015169882331753717
+          ],
+          "test": "paired t-test",
+          "p": 0.008444814408732427,
+          "p_corrected": 0.036663720772147426,
+          "shapiro_p": 0.42981129998837125,
+          "primary_wins": "0/5",
+          "decision": "reject H0",
+          "wrong_direction": true,
+          "corrected_test_disagrees": false
+        }
+      ],
+      "notes": [
+        "Folds share training data; the corrected p-value is the conservative reference.",
+        "n=5: Wilcoxon cannot go below p=0.0625 and Shapiro-Wilk has little power."
+      ]
+    },
+    "group": {
+      "cv_run_files": 1,
+      "n_paired_values": 5,
+      "tests": [
+        {
+          "hypothesis": "H1: hybrid vs DistilRoBERTa-only",
+          "metric": "f1",
+          "baseline": "distilroberta_only",
+          "mean_diff": 0.2595162262899392,
+          "ci95": [
+            0.08019881235690135,
+            0.43883364022297705
+          ],
+          "test": "paired t-test",
+          "p": 0.01588816759086415,
+          "p_corrected": 0.062167091909976706,
+          "shapiro_p": 0.17680206053162173,
+          "primary_wins": "5/5",
+          "decision": "reject H0",
+          "wrong_direction": false,
+          "corrected_test_disagrees": true
+        },
+        {
+          "hypothesis": "H1: hybrid vs DistilRoBERTa-only",
+          "metric": "mcc",
+          "baseline": "distilroberta_only",
+          "mean_diff": 0.2710306709494096,
+          "ci95": [
+            0.07885562702032223,
+            0.46320571487849693
+          ],
+          "test": "paired t-test",
+          "p": 0.017310198901829752,
+          "p_corrected": 0.06664854324181119,
+          "shapiro_p": 0.10505119835374044,
+          "primary_wins": "5/5",
+          "decision": "reject H0",
+          "wrong_direction": false,
+          "corrected_test_disagrees": true
+        },
+        {
+          "hypothesis": "H2: hybrid vs GraphSAGE-only",
+          "metric": "f1",
+          "baseline": "graphsage_only",
+          "mean_diff": 0.28972744718993654,
+          "ci95": [
+            0.12484780239199997,
+            0.4546070919878731
+          ],
+          "test": "paired t-test",
+          "p": 0.008167760223402588,
+          "p_corrected": 0.0356318103385589,
+          "shapiro_p": 0.39882914247896784,
+          "primary_wins": "5/5",
+          "decision": "reject H0",
+          "wrong_direction": false,
+          "corrected_test_disagrees": false
+        },
+        {
+          "hypothesis": "H2: hybrid vs GraphSAGE-only",
+          "metric": "mcc",
+          "baseline": "graphsage_only",
+          "mean_diff": 0.2828092981654623,
+          "ci95": [
+            0.11068112170048575,
+            0.4549374746304389
+          ],
+          "test": "paired t-test",
+          "p": 0.010325184352906825,
+          "p_corrected": 0.04348667498394245,
+          "shapiro_p": 0.30670129765659315,
+          "primary_wins": "5/5",
+          "decision": "reject H0",
+          "wrong_direction": false,
+          "corrected_test_disagrees": false
+        },
+        {
+          "hypothesis": "H3: cross-attention vs late fusion",
+          "metric": "f1",
+          "baseline": "late_concat",
+          "mean_diff": 0.056386239604079805,
+          "ci95": [
+            -0.07112654572813144,
+            0.18389902493629107
+          ],
+          "test": "paired t-test",
+          "p": 0.2868505769236056,
+          "p_corrected": 0.47666601129403563,
+          "shapiro_p": 0.06773716294246475,
+          "primary_wins": "3/5",
+          "decision": "fail to reject H0",
+          "wrong_direction": false,
+          "corrected_test_disagrees": false
+        },
+        {
+          "hypothesis": "H3: cross-attention vs late fusion",
+          "metric": "mcc",
+          "baseline": "late_concat",
+          "mean_diff": 0.055643511360966603,
+          "ci95": [
+            -0.06915760724793185,
+            0.18044462996986504
+          ],
+          "test": "paired t-test",
+          "p": 0.28344661559449413,
+          "p_corrected": 0.4732734181918915,
+          "shapiro_p": 0.10400574275282243,
+          "primary_wins": "3/5",
+          "decision": "fail to reject H0",
+          "wrong_direction": false,
+          "corrected_test_disagrees": false
+        }
+      ],
+      "notes": [
+        "Folds share training data; the corrected p-value is the conservative reference.",
+        "n=5: Wilcoxon cannot go below p=0.0625 and Shapiro-Wilk has little power."
+      ]
+    }
+  }
+}

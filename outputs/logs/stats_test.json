@@ -1,0 +1,26 @@
+{
+  "run": "stats_test",
+  "started": "2026-10-31T20:23:14",
+  "finished": "2026-10-31T20:23:14",
+  "status": "ok",
+  "duration_s": 0.0,
+  "summary": {
+    "stats_file": "outputs/stats_results.json"
+  },
+  "events": [
+    {
+      "t": 0.02,
+      "stage": "stats",
+      "message": "tests computed",
+      "split": "random",
+      "n_paired_values": 5
+    },
+    {
+      "t": 0.04,
+      "stage": "stats",
+      "message": "tests computed",
+      "split": "group",
+      "n_paired_values": 5
+    }
+  ]
+}

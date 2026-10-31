@@ -1,0 +1,100 @@
+{
+  "name": "evelynn",
+  "file": "outputs\\evelynn.pt",
+  "sha256": "54ae104b1f0b3e8001a7f4b322ff4f4fa34e3d18e9789d9e17eaf3901d097f47",
+  "size_mb": 57.5,
+  "built_at": "2026-10-31T20:23:40",
+  "training_mode": "iid_70_15_15",
+  "decision_threshold": 0.7774683544303798,
+  "metrics": {
+    "evaluated_on": "test (held out)",
+    "accuracy": 0.9812765957446808,
+    "f1": 0.7864077669902912,
+    "f2": 0.7729007633587787,
+    "precision": 0.81,
+    "recall": 0.7641509433962265,
+    "mcc": 0.7769861564908402,
+    "pr_auc": 0.8239460041836048
+  },
+  "architecture": {
+    "text_dim": 768,
+    "tabular_dim": 11,
+    "fusion_mode": "cross_attention",
+    "hidden_channels": 256,
+    "out_channels": 128,
+    "attn_dim": 128,
+    "dropout": 0.4
+  },
+  "encoder": {
+    "name": "distilroberta-base",
+    "max_len": 512,
+    "pooling": "mean"
+  },
+  "reference_graph": {
+    "nodes": 15663,
+    "directed_edges": 182180,
+    "fraud_postings": 705,
+    "isolated_postings": 2690
+  },
+  "training_config": {
+    "k_folds": 5,
+    "seed": 42,
+    "split": "random",
+    "n_seeds": 3,
+    "pos_weight_cap": 3.5,
+    "lr": 0.00075,
+    "epochs": 200,
+    "patience": 25,
+    "grad_clip": 1.0,
+    "lr_patience": 10,
+    "lr_factor": 0.5,
+    "threshold_steps": 80,
+    "threshold_min": 0.02,
+    "beta": 1.0,
+    "gamma": 2.0,
+    "tag": ""
+  },
+  "versions": {
+    "torch": "2.5.1+cu121",
+    "torch_geometric": "2.8.0.post1",
+    "transformers": "5.5.4"
+  },
+  "hardware": {
+    "backend": "cuda",
+    "encoder_device": "cuda",
+    "gnn_device": "cuda"
+  },
+  "self_test": {
+    "max_abs_logit_diff": 3.2186508178710938e-06,
+    "passed": true
+  },
+  "example_predictions": [
+    {
+      "title": "Senior Software Engineer",
+      "probability": 0.1740938276052475,
+      "is_fraud": false,
+      "threshold": 0.7774683544303798,
+      "n_neighbors": 0,
+      "neighbors_by_link": {
+        "company": 0,
+        "title": 0,
+        "contact": 0
+      },
+      "neighbors_known_fraud": 0
+    },
+    {
+      "title": "Data Entry Clerk - Work From Home",
+      "probability": 0.7676411271095276,
+      "is_fraud": false,
+      "threshold": 0.7774683544303798,
+      "n_neighbors": 0,
+      "neighbors_by_link": {
+        "company": 0,
+        "title": 0,
+        "contact": 0
+      },
+      "neighbors_known_fraud": 0
+    }
+  ],
+  "usage": "from evelynn import Evelynn; Evelynn.load('outputs/evelynn.pt').predict(posting_dict)"
+}

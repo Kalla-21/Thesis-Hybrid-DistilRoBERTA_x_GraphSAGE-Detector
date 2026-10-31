@@ -1,0 +1,481 @@
+{
+  "run": "train_cv_random_seed42",
+  "started": "2026-10-31T20:12:16",
+  "finished": "2026-10-31T20:18:47",
+  "status": "ok",
+  "duration_s": 391.1,
+  "summary": {
+    "results_file": "outputs\\cv_results_random_seed42.json",
+    "oof_file": "outputs\\oof_random_seed42.npz",
+    "cv_summary": {
+      "distilroberta_only": {
+        "f1": {
+          "mean": 0.5101965441377593,
+          "std": 0.0225481297703978
+        },
+        "f2": {
+          "mean": 0.4897791204075853,
+          "std": 0.019027208957692773
+        },
+        "precision": {
+          "mean": 0.5606082484523609,
+          "std": 0.08803236316766386
+        },
+        "recall": {
+          "mean": 0.4789598108747045,
+          "std": 0.033619647914196096
+        },
+        "pr_auc": {
+          "mean": 0.5081813010327872,
+          "std": 0.04195594629872274
+        },
+        "mcc": {
+          "mean": 0.49373582222299806,
+          "std": 0.030035982890511265
+        }
+      },
+      "text_tabular": {
+        "f1": {
+          "mean": 0.5248475852468536,
+          "std": 0.05689878651674031
+        },
+        "f2": {
+          "mean": 0.5473528080628294,
+          "std": 0.06345362204607609
+        },
+        "precision": {
+          "mean": 0.4981012895749112,
+          "std": 0.05728349932992767
+        },
+        "recall": {
+          "mean": 0.5659574468085107,
+          "std": 0.07040949586377791
+        },
+        "pr_auc": {
+          "mean": 0.53162373113214,
+          "std": 0.07512106128164107
+        },
+        "mcc": {
+          "mean": 0.5046178689964712,
+          "std": 0.05834851323634497
+        }
+      },
+      "graphsage_only": {
+        "f1": {
+          "mean": 0.5391035227167336,
+          "std": 0.042756757600846615
+        },
+        "f2": {
+          "mean": 0.4907313314880283,
+          "std": 0.01625559202362569
+        },
+        "precision": {
+          "mean": 0.6993931730972439,
+          "std": 0.11682429433342362
+        },
+        "recall": {
+          "mean": 0.48132387706855784,
+          "std": 0.04832419621239235
+        },
+        "pr_auc": {
+          "mean": 0.5904018777121212,
+          "std": 0.035849708539173915
+        },
+        "mcc": {
+          "mean": 0.545839294581256,
+          "std": 0.045171898293124096
+        }
+      },
+      "late_concat": {
+        "f1": {
+          "mean": 0.7736359688059892,
+          "std": 0.01835058780957069
+        },
+        "f2": {
+          "mean": 0.737054706169632,
+          "std": 0.04427309805522074
+        },
+        "precision": {
+          "mean": 0.8523603706895215,
+          "std": 0.052705270127536376
+        },
+        "recall": {
+          "mean": 0.715839243498818,
+          "std": 0.06013098910323111
+        },
+        "pr_auc": {
+          "mean": 0.8481137655485022,
+          "std": 0.021050223003530103
+        },
+        "mcc": {
+          "mean": 0.7695348978048561,
+          "std": 0.015140281958351225
+        }
+      },
+      "cross_attention": {
+        "f1": {
+          "mean": 0.7424650958201441,
+          "std": 0.020377882899300395
+        },
+        "f2": {
+          "mean": 0.7229042244268062,
+          "std": 0.03312094449864637
+        },
+        "precision": {
+          "mean": 0.7843113952593039,
+          "std": 0.04909310784858538
+        },
+        "recall": {
+          "mean": 0.7115839243498818,
+          "std": 0.04468022564511565
+        },
+        "pr_auc": {
+          "mean": 0.8170403397615302,
+          "std": 0.036414843660445374
+        },
+        "mcc": {
+          "mean": 0.7338817974545547,
+          "std": 0.020307427607612703
+        }
+      }
+    }
+  },
+  "events": [
+    {
+      "t": 0.02,
+      "stage": "system",
+      "message": "hardware",
+      "backend": "cuda",
+      "encoder_device": "cuda",
+      "gnn_device": "cuda"
+    },
+    {
+      "t": 2.44,
+      "stage": "data",
+      "message": "deduplicated",
+      "rows_raw": 17880,
+      "rows": 15663,
+      "conflicting_label_groups": 0,
+      "fraud": 705
+    },
+    {
+      "t": 5.99,
+      "stage": "data",
+      "message": "graph built",
+      "directed_edges": 182180,
+      "isolated_postings": 2690,
+      "tabular_dim": 11
+    },
+    {
+      "t": 116.77,
+      "stage": "embeddings",
+      "message": "computed and cached",
+      "path": "outputs\\emb_full_text_512_d81ea7ec72.npy",
+      "shape": [
+        15663,
+        768
+      ],
+      "seconds": 110.6
+    },
+    {
+      "t": 116.79,
+      "stage": "cv",
+      "message": "starting",
+      "split": "random",
+      "seed": 42,
+      "config": {
+        "k_folds": 5,
+        "seed": 42,
+        "split": "random",
+        "n_seeds": 3,
+        "pos_weight_cap": 3.5,
+        "lr": 0.00075,
+        "epochs": 200,
+        "patience": 25,
+        "grad_clip": 1.0,
+        "lr_patience": 10,
+        "lr_factor": 0.5,
+        "threshold_steps": 80,
+        "threshold_min": 0.02,
+        "beta": 1.0,
+        "gamma": 2.0,
+        "tag": ""
+      }
+    },
+    {
+      "t": 121.22,
+      "stage": "fold",
+      "message": "distilroberta_only done",
+      "fold": 1,
+      "condition": "distilroberta_only",
+      "f1": 0.4875070703670981,
+      "f2": 0.48286078312795594,
+      "mcc": 0.4639532924240252,
+      "pr_auc": 0.5056981081284435
+    },
+    {
+      "t": 125.75,
+      "stage": "fold",
+      "message": "text_tabular done",
+      "fold": 1,
+      "condition": "text_tabular",
+      "f1": 0.5463943550157891,
+      "f2": 0.5954844384327065,
+      "mcc": 0.5275932694672879,
+      "pr_auc": 0.561066577506068
+    },
+    {
+      "t": 136.62,
+      "stage": "fold",
+      "message": "graphsage_only done",
+      "fold": 1,
+      "condition": "graphsage_only",
+      "f1": 0.5371213982120393,
+      "f2": 0.51679545227319,
+      "mcc": 0.5213304477917025,
+      "pr_auc": 0.617274345919896
+    },
+    {
+      "t": 148.83,
+      "stage": "fold",
+      "message": "late_concat done",
+      "fold": 1,
+      "condition": "late_concat",
+      "f1": 0.7784884006979604,
+      "f2": 0.7397605418106125,
+      "mcc": 0.7727745740261865,
+      "pr_auc": 0.8471349330204075
+    },
+    {
+      "t": 162.76,
+      "stage": "fold",
+      "message": "cross_attention done",
+      "fold": 1,
+      "condition": "cross_attention",
+      "f1": 0.7437832919126213,
+      "f2": 0.7398947952111613,
+      "mcc": 0.7322361449453755,
+      "pr_auc": 0.8147840683521385
+    },
+    {
+      "t": 166.83,
+      "stage": "fold",
+      "message": "distilroberta_only done",
+      "fold": 2,
+      "condition": "distilroberta_only",
+      "f1": 0.520016282938343,
+      "f2": 0.5214282614706084,
+      "mcc": 0.49740880386573477,
+      "pr_auc": 0.5161583926147377
+    },
+    {
+      "t": 171.05,
+      "stage": "fold",
+      "message": "text_tabular done",
+      "fold": 2,
+      "condition": "text_tabular",
+      "f1": 0.5353648915187377,
+      "f2": 0.5691301049321497,
+      "mcc": 0.5154478067932938,
+      "pr_auc": 0.5551174482672218
+    },
+    {
+      "t": 181.28,
+      "stage": "fold",
+      "message": "graphsage_only done",
+      "fold": 2,
+      "condition": "graphsage_only",
+      "f1": 0.4650785490191902,
+      "f2": 0.4791003845673003,
+      "mcc": 0.4824908211971905,
+      "pr_auc": 0.534211827467936
+    },
+    {
+      "t": 196.65,
+      "stage": "fold",
+      "message": "late_concat done",
+      "fold": 2,
+      "condition": "late_concat",
+      "f1": 0.7893180589348473,
+      "f2": 0.7836814530964867,
+      "mcc": 0.7798306328400916,
+      "pr_auc": 0.8412564065993328
+    },
+    {
+      "t": 212.63,
+      "stage": "fold",
+      "message": "cross_attention done",
+      "fold": 2,
+      "condition": "cross_attention",
+      "f1": 0.731511817048554,
+      "f2": 0.7379387873859887,
+      "mcc": 0.7187595084763162,
+      "pr_auc": 0.7648235419359949
+    },
+    {
+      "t": 216.57,
+      "stage": "fold",
+      "message": "distilroberta_only done",
+      "fold": 3,
+      "condition": "distilroberta_only",
+      "f1": 0.48138171635796095,
+      "f2": 0.49699960907115726,
+      "mcc": 0.45673713530714677,
+      "pr_auc": 0.4439403971532873
+    },
+    {
+      "t": 220.85,
+      "stage": "fold",
+      "message": "text_tabular done",
+      "fold": 3,
+      "condition": "text_tabular",
+      "f1": 0.5488274481240168,
+      "f2": 0.5812744882986141,
+      "mcc": 0.5280826510499289,
+      "pr_auc": 0.5318473688395318
+    },
+    {
+      "t": 232.29,
+      "stage": "fold",
+      "message": "graphsage_only done",
+      "fold": 3,
+      "condition": "graphsage_only",
+      "f1": 0.5395165778599028,
+      "f2": 0.47073268037393595,
+      "mcc": 0.5466927462575671,
+      "pr_auc": 0.567902245833693
+    },
+    {
+      "t": 245.55,
+      "stage": "fold",
+      "message": "late_concat done",
+      "fold": 3,
+      "condition": "late_concat",
+      "f1": 0.739156108008567,
+      "f2": 0.6750059774780292,
+      "mcc": 0.7396388075716317,
+      "pr_auc": 0.8129051319593867
+    },
+    {
+      "t": 263.77,
+      "stage": "fold",
+      "message": "cross_attention done",
+      "fold": 3,
+      "condition": "cross_attention",
+      "f1": 0.7101453134858714,
+      "f2": 0.6660259293172119,
+      "mcc": 0.7054477309447512,
+      "pr_auc": 0.7913954580969452
+    },
+    {
+      "t": 268.04,
+      "stage": "fold",
+      "message": "distilroberta_only done",
+      "fold": 4,
+      "condition": "distilroberta_only",
+      "f1": 0.5202741702741703,
+      "f2": 0.4638519948518589,
+      "mcc": 0.5141077225109575,
+      "pr_auc": 0.499612690680916
+    },
+    {
+      "t": 271.47,
+      "stage": "fold",
+      "message": "text_tabular done",
+      "fold": 4,
+      "condition": "text_tabular",
+      "f1": 0.4147677485587933,
+      "f2": 0.4219533960484338,
+      "mcc": 0.39175971500955753,
+      "pr_auc": 0.39238489854441144
+    },
+    {
+      "t": 280.82,
+      "stage": "fold",
+      "message": "graphsage_only done",
+      "fold": 4,
+      "condition": "graphsage_only",
+      "f1": 0.5569045975738262,
+      "f2": 0.48676237674285394,
+      "mcc": 0.5593143710234053,
+      "pr_auc": 0.5976314663055601
+    },
+    {
+      "t": 298.51,
+      "stage": "fold",
+      "message": "late_concat done",
+      "fold": 4,
+      "condition": "late_concat",
+      "f1": 0.7726039745129872,
+      "f2": 0.7004694091776044,
+      "mcc": 0.7767075400580693,
+      "pr_auc": 0.8705026640613062
+    },
+    {
+      "t": 323.71,
+      "stage": "fold",
+      "message": "cross_attention done",
+      "fold": 4,
+      "condition": "cross_attention",
+      "f1": 0.7595756871598671,
+      "f2": 0.7086260585847081,
+      "mcc": 0.7560035404097444,
+      "pr_auc": 0.8531359533498852
+    },
+    {
+      "t": 327.98,
+      "stage": "fold",
+      "message": "distilroberta_only done",
+      "fold": 5,
+      "condition": "distilroberta_only",
+      "f1": 0.541803480751224,
+      "f2": 0.4837549535163459,
+      "mcc": 0.5364721570071264,
+      "pr_auc": 0.5754969165865514
+    },
+    {
+      "t": 332.73,
+      "stage": "fold",
+      "message": "text_tabular done",
+      "fold": 5,
+      "condition": "text_tabular",
+      "f1": 0.5788834830169308,
+      "f2": 0.5689216126022428,
+      "mcc": 0.560205902662288,
+      "pr_auc": 0.6177023625034667
+    },
+    {
+      "t": 345.08,
+      "stage": "fold",
+      "message": "graphsage_only done",
+      "fold": 5,
+      "condition": "graphsage_only",
+      "f1": 0.5968964909187092,
+      "f2": 0.5002657634828613,
+      "mcc": 0.6193680866364143,
+      "pr_auc": 0.6349895030335208
+    },
+    {
+      "t": 361.73,
+      "stage": "fold",
+      "message": "late_concat done",
+      "fold": 5,
+      "condition": "late_concat",
+      "f1": 0.7886133018755839,
+      "f2": 0.7863561492854272,
+      "mcc": 0.7787229345283011,
+      "pr_auc": 0.8687696921020777
+    },
+    {
+      "t": 391.06,
+      "stage": "fold",
+      "message": "cross_attention done",
+      "fold": 5,
+      "condition": "cross_attention",
+      "f1": 0.7673093694938066,
+      "f2": 0.7620355516349614,
+      "mcc": 0.7569620624965862,
+      "pr_auc": 0.8610626770726876
+    }
+  ]
+}

@@ -1,0 +1,107 @@
+{
+  "run": "build_model",
+  "started": "2026-10-31T20:23:27",
+  "finished": "2026-10-31T20:23:45",
+  "status": "ok",
+  "duration_s": 18.7,
+  "summary": {
+    "model_file": "outputs\\evelynn.pt",
+    "model_card": "outputs\\evelynn_card.json",
+    "sha256": "54ae104b1f0b3e8001a7f4b322ff4f4fa34e3d18e9789d9e17eaf3901d097f47"
+  },
+  "events": [
+    {
+      "t": 0.01,
+      "stage": "system",
+      "message": "hardware",
+      "backend": "cuda",
+      "encoder_device": "cuda",
+      "gnn_device": "cuda"
+    },
+    {
+      "t": 3.13,
+      "stage": "data",
+      "message": "deduplicated",
+      "rows_raw": 17880,
+      "rows": 15663,
+      "conflicting_label_groups": 0,
+      "fraud": 705
+    },
+    {
+      "t": 7.0,
+      "stage": "data",
+      "message": "graph built",
+      "directed_edges": 182180,
+      "isolated_postings": 2690,
+      "tabular_dim": 11
+    },
+    {
+      "t": 7.15,
+      "stage": "embeddings",
+      "message": "loaded from cache",
+      "path": "outputs\\emb_full_text_512_d81ea7ec72.npy"
+    },
+    {
+      "t": 13.53,
+      "stage": "train",
+      "message": "final model trained",
+      "seconds": 6.0,
+      "threshold": 0.7774683544303798,
+      "evaluated_on": "test (held out)",
+      "accuracy": 0.9812765957446808,
+      "f1": 0.7864077669902912,
+      "f2": 0.7729007633587787,
+      "precision": 0.81,
+      "recall": 0.7641509433962265,
+      "mcc": 0.7769861564908402,
+      "pr_auc": 0.8239460041836048
+    },
+    {
+      "t": 13.7,
+      "stage": "export",
+      "message": "saved",
+      "path": "outputs\\evelynn.pt",
+      "size_mb": 57.5
+    },
+    {
+      "t": 13.9,
+      "stage": "verify",
+      "message": "reference-graph self test",
+      "max_abs_logit_diff": 3.2186508178710938e-06,
+      "passed": true
+    },
+    {
+      "t": 18.68,
+      "stage": "verify",
+      "message": "example predictions",
+      "predictions": [
+        {
+          "title": "Senior Software Engineer",
+          "probability": 0.1740938276052475,
+          "is_fraud": false,
+          "threshold": 0.7774683544303798,
+          "n_neighbors": 0,
+          "neighbors_by_link": {
+            "company": 0,
+            "title": 0,
+            "contact": 0
+          },
+          "neighbors_known_fraud": 0
+        },
+        {
+          "title": "Data Entry Clerk - Work From Home",
+          "probability": 0.7676411271095276,
+          "is_fraud": false,
+          "threshold": 0.7774683544303798,
+          "n_neighbors": 0,
+          "neighbors_by_link": {
+            "company": 0,
+            "title": 0,
+            "contact": 0
+          },
+          "neighbors_known_fraud": 0
+        }
+      ]
+    }
+  ]
+}
