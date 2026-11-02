@@ -45,7 +45,8 @@ EXAMPLE_POSTINGS = [
 
 
 def build_reference_index(df):
-    """Lookup tables used at inference to link a new posting to the reference graph."""
+    # Build a reference index mapping company profiles, normalized titles,
+    # and contact information to the corresponding row indices in the DataFrame.
     company, title, contact = {}, {}, {}
     for i, (profile, norm_title, emails, phones) in enumerate(
         zip(df["company_profile"], df["normalized_title"], df["emails"], df["phones"])
@@ -61,6 +62,7 @@ def build_reference_index(df):
 
 
 def sha256_of(path):
+    # Compute the SHA-256 hash of the file at the given path, reading it in 1 MB chunks.
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -69,22 +71,31 @@ def sha256_of(path):
 
 
 def build(out_path, seed, all_data):
+    # Build the final Evelynn model by training on the provided dataset, saving the model and its metadata to the specified output path.
     with RunLogger("build_model") as log:
-        set_seed(seed)
+        set_seed(seed) # Set the random seed for reproducibility of results across runs.
         df, x_text, x_tab, y, edge_index = load_inputs(log)
         labels = df["label"].values
 
+        # Split the dataset into training, validation, and test masks based on the specified seed 
+        # and whether to use all data for training or hold out a test set.
         train_m, val_m, test_m = (m.to(GNN_DEVICE) for m in iid_masks(labels, seed))
         if all_data:
             train_m, eval_m, eval_name = train_m | test_m, val_m, "validation (NOT held out)"
         else:
             eval_m, eval_name = test_m, "test (held out)"
 
+        # Compute the positive class weight for the loss function based on the training data, 
+        # and define the model architecture.
         cfg = {**CV_CONFIG, "seed": seed}
         pos_weight = compute_pos_weight(y, train_m, cfg["pos_weight_cap"]).to(GNN_DEVICE)
         arch = {"text_dim": x_text.shape[1], "tabular_dim": x_tab.shape[1], "fusion_mode": "cross_attention", **ARCH}
+        # Initialize the FraudDetectionGraphSAGE model with the specified architecture, 
+        # which includes dimensions for text and tabular features, as well as other hyperparameters.
         model = FraudDetectionGraphSAGE(**arch)
-
+        
+        # Train the final model on the training data, 
+        # evaluate it on the validation or test set, and log the results.
         t0 = time.time()
         metrics, threshold, _ = train_one_model(
             model, lambda m: m(x_text, edge_index, x_tab), y, train_m, val_m, eval_m,
@@ -93,12 +104,19 @@ def build(out_path, seed, all_data):
         log.event("train", "final model trained", seconds=round(time.time() - t0, 1),
                   threshold=threshold, evaluated_on=eval_name, **metrics)
 
+        # Save the trained model, its architecture, training configuration, 
+        # and reference graph information to a file at the specified output path.
         model.eval()
         with torch.no_grad():
             ref_logits = model(x_text, edge_index, x_tab).squeeze(1).cpu()
 
+        # Compute the number of nodes in the reference graph and their degrees based on the edge indices,
+        # which will be included in the model metadata for reference.
         n_nodes = int(x_text.shape[0])
         deg = torch.bincount(edge_index[0], minlength=n_nodes)
+        
+        # Build a payload dictionary containing the model's architecture, state, training configuration,
+        # metrics, and reference graph information, which will be saved to a file.
         payload = {
             "format_version": FORMAT_VERSION,
             "name": "evelynn",
@@ -122,7 +140,7 @@ def build(out_path, seed, all_data):
         size_mb = round(os.path.getsize(out_path) / 1e6, 1)
         log.event("export", "saved", path=out_path, size_mb=size_mb)
 
-        # --- verify the exported file the way a future user would load it ---
+        # verify the exported file the way a future user would load it 
         model_loaded = Evelynn.load(out_path, device=GNN_DEVICE)
         self_test = model_loaded.self_test()
         log.event("verify", "reference-graph self test", **self_test)
@@ -135,6 +153,8 @@ def build(out_path, seed, all_data):
             examples.append({"title": posting["title"], **result})
         log.event("verify", "example predictions", predictions=examples)
 
+        # build a model card with metadata about the model, its training, and its performance, 
+        # and save it as a JSON file alongside the model file.
         card = {
             "name": "evelynn",
             "file": out_path,
@@ -160,6 +180,8 @@ def build(out_path, seed, all_data):
             "example_predictions": examples,
             "usage": "from evelynn import Evelynn; Evelynn.load('outputs/evelynn.pt').predict(posting_dict)",
         }
+        
+        # save the model card as a JSON file in the same directory as the model file, with a name based on the model file name.
         card_path = os.path.join(os.path.dirname(out_path) or ".", "evelynn_card.json")
         with open(card_path, "w") as f:
             json.dump(card, f, indent=2)

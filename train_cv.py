@@ -1,5 +1,6 @@
 # train_cv.py
-from logger import RunLogger  # keep first: configures library logging before transformers loads
+# import all the necessary libraries and modules for training and evaluating the models.
+from logger import RunLogger  
 
 import hashlib
 import json
@@ -25,41 +26,44 @@ from utils import (
     set_seed, stratified_kfold_masks,
 )
 
+# hyperparameters and configuration for cross-validation training, 
+# including the number of folds, learning rate, number of epochs, and other training settings.
+
 CV_CONFIG = {
-    "k_folds":         5,
-    "seed":            42,
+    "k_folds":         5,          # number of folds for cross-validation
+    "seed":            42,         # random seed for reproducibility
     "split":           "random",   # "random" or "group"
     "n_seeds":         3,          # model seeds averaged inside every fold
-    "pos_weight_cap":  3.5,
-    "lr":              0.00075,
-    "epochs":          200,
-    "patience":        25,
-    "grad_clip":       1.0,
-    "lr_patience":     10,
-    "lr_factor":       0.5,
-    "threshold_steps": 80,
-    "threshold_min":   0.02,
-    "beta":            1.0,
-    "gamma":           2.0,
-    "tag":             "",
+    "pos_weight_cap":  3.5,        # maximum weight for the positive class in the loss function
+    "lr":              0.00075,    # learning rate for the Adam optimizer
+    "epochs":          200,        # maximum number of training epochs
+    "patience":        25,         # number of epochs to wait for improvement before early stopping    
+    "grad_clip":       1.0,        # maximum gradient norm for gradient clipping to prevent exploding gradients
+    "lr_patience":     10,         # number of epochs to wait for improvement before reducing the learning rate
+    "lr_factor":       0.5,        # factor by which to reduce the learning rate when plateauing
+    "threshold_steps": 80,         # number of threshold values to evaluate when tuning the decision threshold for classification
+    "threshold_min":   0.02,       # minimum threshold value to consider when tuning the decision threshold for classification
+    "beta":            1.0,        # beta parameter for the F-beta score used in threshold tuning
+    "gamma":           2.0,        # gamma parameter for the focal loss function used in training
+    "tag":             "",         # optional tag to append to output file names for distinguishing different runs or configurations
 }
-CONDITIONS = ["distilroberta_only", "text_tabular", "graphsage_only", "late_concat", "cross_attention"]
-SUMMARY_METRICS = ["f1", "f2", "precision", "recall", "pr_auc", "mcc"]
+CONDITIONS = ["distilroberta_only", "text_tabular", "graphsage_only", "late_concat", "cross_attention"] # models
+SUMMARY_METRICS = ["f1", "f2", "precision", "recall", "pr_auc", "mcc"] # metrics to summarize the performance of each model across folds and seeds
 
 
 def tune_threshold(probs, labels, steps=80, beta=1.0, t_min=0.02):
-    """Pick the decision threshold with the best (lightly smoothed) F-beta on validation data."""
+    # Tune the decision threshold for binary classification by evaluating the F-beta score across a range of threshold values.
     grid = np.linspace(t_min, 0.9, steps)
     scores = np.array([
         fbeta_score(labels, (probs >= t).astype(float), beta=beta, zero_division=0) for t in grid
     ])
-    smooth = np.convolve(scores, np.ones(5) / 5, mode="same")
-    i = int(smooth.argmax())
+    smooth = np.convolve(scores, np.ones(5) / 5, mode="same") # 5 point moving average to reduce noise in the F-beta scores across thresholds
+    i = int(smooth.argmax()) # Takes the grid value where the smoothed curve is highest and returns it with the unsmoothed score at that point.
     return float(grid[i]), float(scores[i])
 
 
-def get_metrics(y_true, y_pred, probs=None):
-    m = {
+def get_metrics(y_true, y_pred, probs=None): 
+    m = { # compute various classification metrics based on the true labels, predicted labels, and predicted probabilities.
         "accuracy":  accuracy_score(y_true, y_pred),
         "f1":        f1_score(y_true, y_pred, zero_division=0),
         "f2":        fbeta_score(y_true, y_pred, beta=2.0, zero_division=0),
@@ -72,17 +76,20 @@ def get_metrics(y_true, y_pred, probs=None):
     return m
 
 
-def compute_pos_weight(y, train_mask, cap):
+def compute_pos_weight(y, train_mask, cap): # compute the positive class weight for the loss function based on 
+                        #  the class distribution in the training set, with an upper limit specified by `cap`.
     num_licit = (y[train_mask] == 0).sum().item()
     num_scam = (y[train_mask] == 1).sum().item()
     return torch.tensor([min(num_licit / max(num_scam, 1), cap)], dtype=torch.float)
 
 
-def make_conditions(x_text, x_tab, edge_index, seed):
-    """The five models, each as (model factory, forward function)."""
+def make_conditions(x_text, x_tab, edge_index, seed): 
+    # Returns a dict that maps each condition name to a pair of functions: one that creates a new model instance,
+    # and another that computes the forward pass for that model.
     td, tt = x_text.shape[1], x_tab.shape[1]
     num_nodes = x_text.shape[0]
-    return {
+    return { # each condition corresponds to a different model architecture or combination of features, 
+            #allowing for comparison of their performance on the fraud detection task.
         "distilroberta_only": (lambda: DistilRobertaOnlyClassifier(text_dim=td),
                                lambda m: m(x_text)),
         "text_tabular":       (lambda: TextTabularMLP(td, tt),
@@ -98,8 +105,8 @@ def make_conditions(x_text, x_tab, edge_index, seed):
 
 def train_one_model(model, forward_fn, y, train_mask, val_mask, test_mask,
                     pos_weight, cfg, device):
-    """Full-batch training with early stopping on validation PR-AUC. The best checkpoint is
-    loaded back into `model`; returns (test metrics, validation-tuned threshold, probabilities for all nodes)."""
+    # Full-batch training with early stopping up to 200 epochs, using the validation set to tune the decision threshold for each model.
+    # The best checkpoint is loaded back into `model`; returns (test metrics, validation-tuned threshold, probabilities for all nodes).
     model = model.to(device)
     criterion = FocalLoss(gamma=cfg["gamma"], pos_weight=pos_weight)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg["lr"], weight_decay=1e-4)
@@ -109,6 +116,7 @@ def train_one_model(model, forward_fn, y, train_mask, val_mask, test_mask,
 
     best_val, best_state, patience_count = 0.0, None, 0
 
+    # Train the model for a maximum number of epochs, using early stopping based on validation performance.
     for _ in range(cfg["epochs"]):
         model.train()
         optimizer.zero_grad()
@@ -139,19 +147,25 @@ def train_one_model(model, forward_fn, y, train_mask, val_mask, test_mask,
     if best_state is None:  # validation score never improved: keep the last epoch
         best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
+    # Load the best model state and evaluate on the test set, tuning the decision threshold based on validation performance.
     model.load_state_dict(best_state)
     model.eval()
     with torch.no_grad():
         probs = torch.sigmoid(forward_fn(model)).squeeze().cpu().numpy()
 
+    # Convert the labels and masks to numpy arrays for threshold tuning and metric computation.
     y_np = y.cpu().numpy()
     val_np = val_mask.cpu().numpy()
     test_np = test_mask.cpu().numpy()
 
+    # Tune the decision threshold based on the validation set, and compute metrics on the test set using the tuned threshold.
     best_thresh, _ = tune_threshold(
         probs[val_np], y_np[val_np],
         cfg["threshold_steps"], cfg["beta"], cfg["threshold_min"],
     )
+    
+    # Compute the predicted probabilities and binary predictions for the test set using the tuned threshold,
+    # and calculate various classification metrics.
     test_probs = probs[test_np]
     test_preds = (test_probs >= best_thresh).astype(float)
     metrics = get_metrics(y_np[test_np], test_preds, test_probs)
@@ -159,8 +173,8 @@ def train_one_model(model, forward_fn, y, train_mask, val_mask, test_mask,
 
 
 def get_embeddings(df, col, max_len, log):
-    """DistilRoBERTa embeddings of df[col], cached on disk. The cache name contains a hash of the
-    texts, so changing the preprocessing automatically invalidates the cache."""
+    # Compute and cache DistilRoBERTa embeddings for the specified text column in the dataframe.
+    # Returns the 768-d text embeddings for df[col], cached.
     texts = df[col].tolist()
     key = hashlib.sha1("\x1f".join(texts).encode("utf-8")).hexdigest()[:10]
     path = os.path.join("outputs", f"emb_{col}_{max_len}_{key}.npy")
@@ -176,11 +190,13 @@ def get_embeddings(df, col, max_len, log):
 
 
 def load_inputs(log):
-    """Shared by train_cv.py and build_model.py: dataframe + all model inputs as tensors."""
+    # Load and preprocess the input data, including text embeddings, tabular features, labels, and graph edge indices.
     os.makedirs("outputs", exist_ok=True)
     log.event("system", "hardware", **HARDWARE)
     df, edges_arr, tabular_features = load_data(log)
     embeddings = get_embeddings(df, "full_text", 512, log)
+    
+    # Convert the embeddings, tabular features, labels, and edge indices to PyTorch tensors and move them to the appropriate device for training.
     x_text = torch.tensor(embeddings, dtype=torch.float).to(GNN_DEVICE)
     x_tab = torch.tensor(tabular_features, dtype=torch.float).to(GNN_DEVICE)
     y = torch.tensor(df["label"].values, dtype=torch.float).to(GNN_DEVICE)
@@ -189,6 +205,7 @@ def load_inputs(log):
 
 
 def _new_oof(labels, k):
+    # Create a new out-of-fold (OOF) predictions dictionary for cross-validation, initialized with zeros and -1 for fold indices.
     n = len(labels)
     oof = {"y": labels.astype(np.int8), "fold": np.full(n, -1, dtype=np.int8)}
     for cond in CONDITIONS:
@@ -198,19 +215,26 @@ def _new_oof(labels, k):
 
 
 def run(split="random", seed=42):
+    # Run cross-validation training for the specified split type and random seed, logging results and saving out-of-fold predictions.
+    # The function performs k-fold cross-validation, trains multiple models for each fold, tunes thresholds, and saves results to disk.
+    # The results include metrics for each model, connectivity breakdowns, and out-of-fold predictions for further analysis.
+    # The function also handles logging and error reporting, ensuring that the training process is well-documented and reproducible.
     cfg = {**CV_CONFIG, "split": split, "seed": seed}
+    
+    # Create a new RunLogger context for the cross-validation training run, which will log events and metrics throughout the process.
     with RunLogger(f"train_cv_{split}_seed{seed}") as log:
         set_seed(seed)
         df, x_text, x_tab, y, edge_index = load_inputs(log)
         labels = df["label"].values
         groups = df["group_id"].values if split == "group" else None
-
+        
         results = {cond: [] for cond in CONDITIONS}
         oof = _new_oof(labels, cfg["k_folds"])
         results_path = os.path.join("outputs", f"cv_results_{split}{cfg['tag']}_seed{seed}.json")
         oof_path = os.path.join("outputs", f"oof_{split}{cfg['tag']}_seed{seed}.npz")
         log.event("cv", "starting", split=split, seed=seed, config=cfg)
 
+        # Iterate over each fold in the stratified k-fold cross-validation, training and evaluating models for each condition.
         for fold_i, train_mask, val_mask, test_mask in stratified_kfold_masks(
             labels, k=cfg["k_folds"], seed=seed, groups=groups
         ):
@@ -219,6 +243,7 @@ def run(split="random", seed=42):
             test_np = test_mask.cpu().numpy()
             conds = make_conditions(x_text, x_tab, edge_index, seed)
 
+            # Train and evaluate each model condition for the current fold, averaging results across multiple random seeds for robustness.
             for name, (make_model, forward_fn) in conds.items():
                 per_seed, first = [], None
                 for s in range(cfg["n_seeds"]):
