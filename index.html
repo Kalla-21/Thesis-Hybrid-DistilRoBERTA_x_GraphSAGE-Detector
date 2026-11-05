@@ -398,6 +398,7 @@
         if (data.status === "success") renderExplanation(explainDiv, data);
         else explainDiv.append(el("p", { class: "hint" }, `Could not explain: ${data.detail}`));
       } catch (error) {
+        console.error("Explanation render error:", error);
         explainDiv.replaceChildren(el("p", { class: "hint" }, "Could not load the explanation."));
       }
     }

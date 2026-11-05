@@ -1,65 +1,69 @@
 # train_cv.py
-import os
+# import all the necessary libraries and modules for training and evaluating the models.
+from logger import RunLogger  
+
+import hashlib
 import json
+import os
+import sys
 import time
+
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 from sklearn.metrics import (
-    f1_score, fbeta_score, recall_score, precision_score,
-    accuracy_score, matthews_corrcoef, average_precision_score,
+    accuracy_score, average_precision_score, f1_score, fbeta_score,
+    matthews_corrcoef, precision_score, recall_score,
 )
-from torchgen import model
 
 from losses import FocalLoss
-from utils import (
-    DEVICE, GNN_DEVICE, JobTextDataset, set_seed,
-    load_and_split_data, stratified_kfold_masks, connectivity_breakdown,
-)
 from models.distilroberta_encoder import DistilRobertaModule
 from models.graphsage_model import (
-    FraudDetectionGraphSAGE, DistilRobertaOnlyClassifier,
+    DistilRobertaOnlyClassifier, FraudDetectionGraphSAGE,
     GraphSAGEOnlyBaseline, TextTabularMLP,
 )
+from utils import (
+    DEVICE, GNN_DEVICE, HARDWARE, connectivity_breakdown, load_data,
+    set_seed, stratified_kfold_masks,
+)
+
+# hyperparameters and configuration for cross-validation training, 
+# including the number of folds, learning rate, number of epochs, and other training settings.
 
 CV_CONFIG = {
-    "k_folds":         5,
-    "seed":            42,
-    "split":           "random",  # run "group" first, then "random" for comparison (no need to delete the outputs of the first run)
-    "n_seeds":         1,
-    "pos_weight_cap":  3.5,
-    "lr":              0.00075,
-    "epochs":          200,
-    "patience":        25,
-    "grad_clip":       1.0,
-    "lr_patience":     10,
-    "lr_factor":       0.5,
-    "threshold_steps": 80,
-    "threshold_min":   0.02,
-    "beta":            1.0,
-    "gamma":           2.0,
-    "tab_mode":        "paper",
-    "edge_types":      ("company", "title"),
-    "cap_cliques":     False,
-    "tag": "",
+    "k_folds":         5,          # number of folds for cross-validation
+    "seed":            42,         # random seed for reproducibility
+    "split":           "random",   # "random" or "group"
+    "n_seeds":         3,          # model seeds averaged inside every fold
+    "pos_weight_cap":  3.5,        # maximum weight for the positive class in the loss function
+    "lr":              0.00075,    # learning rate for the Adam optimizer
+    "epochs":          200,        # maximum number of training epochs
+    "patience":        25,         # number of epochs to wait for improvement before early stopping    
+    "grad_clip":       1.0,        # maximum gradient norm for gradient clipping to prevent exploding gradients
+    "lr_patience":     10,         # number of epochs to wait for improvement before reducing the learning rate
+    "lr_factor":       0.5,        # factor by which to reduce the learning rate when plateauing
+    "threshold_steps": 80,         # number of threshold values to evaluate when tuning the decision threshold for classification
+    "threshold_min":   0.02,       # minimum threshold value to consider when tuning the decision threshold for classification
+    "beta":            1.0,        # beta parameter for the F-beta score used in threshold tuning
+    "gamma":           2.0,        # gamma parameter for the focal loss function used in training
+    "tag":             "",         # optional tag to append to output file names for distinguishing different runs or configurations
 }
-CONDITIONS = ["distilroberta_only", "text_tabular", "graphsage_only",
-              "late_concat", "cross_attention"]
+CONDITIONS = ["distilroberta_only", "text_tabular", "graphsage_only", "late_concat", "cross_attention"] # models
+SUMMARY_METRICS = ["f1", "f2", "precision", "recall", "pr_auc", "mcc"] # metrics to summarize the performance of each model across folds and seeds
 
 
-def tune_threshold(probs, labels, steps=80, beta=2.0, t_min=0.02):
+def tune_threshold(probs, labels, steps=80, beta=1.0, t_min=0.02):
+    # Tune the decision threshold for binary classification by evaluating the F-beta score across a range of threshold values.
     grid = np.linspace(t_min, 0.9, steps)
     scores = np.array([
-        fbeta_score(labels, (probs >= t).astype(float), beta=beta, zero_division=0)
-        for t in grid
+        fbeta_score(labels, (probs >= t).astype(float), beta=beta, zero_division=0) for t in grid
     ])
-    smooth = np.convolve(scores, np.ones(5) / 5, mode="same")
-    i = int(smooth.argmax())
+    smooth = np.convolve(scores, np.ones(5) / 5, mode="same") # 5 point moving average to reduce noise in the F-beta scores across thresholds
+    i = int(smooth.argmax()) # Takes the grid value where the smoothed curve is highest and returns it with the unsmoothed score at that point.
     return float(grid[i]), float(scores[i])
 
 
-def get_metrics(y_true, y_pred, probs=None):
-    m = {
+def get_metrics(y_true, y_pred, probs=None): 
+    m = { # compute various classification metrics based on the true labels, predicted labels, and predicted probabilities.
         "accuracy":  accuracy_score(y_true, y_pred),
         "f1":        f1_score(y_true, y_pred, zero_division=0),
         "f2":        fbeta_score(y_true, y_pred, beta=2.0, zero_division=0),
@@ -72,8 +76,37 @@ def get_metrics(y_true, y_pred, probs=None):
     return m
 
 
+def compute_pos_weight(y, train_mask, cap): # compute the positive class weight for the loss function based on 
+                        #  the class distribution in the training set, with an upper limit specified by `cap`.
+    num_licit = (y[train_mask] == 0).sum().item()
+    num_scam = (y[train_mask] == 1).sum().item()
+    return torch.tensor([min(num_licit / max(num_scam, 1), cap)], dtype=torch.float)
+
+
+def make_conditions(x_text, x_tab, edge_index, seed): 
+    # Returns a dict that maps each condition name to a pair of functions: one that creates a new model instance,
+    # and another that computes the forward pass for that model.
+    td, tt = x_text.shape[1], x_tab.shape[1]
+    num_nodes = x_text.shape[0]
+    return { # each condition corresponds to a different model architecture or combination of features, 
+            #allowing for comparison of their performance on the fraud detection task.
+        "distilroberta_only": (lambda: DistilRobertaOnlyClassifier(text_dim=td),
+                               lambda m: m(x_text)),
+        "text_tabular":       (lambda: TextTabularMLP(td, tt),
+                               lambda m: m(x_text, x_tab)),
+        "graphsage_only":     (lambda: GraphSAGEOnlyBaseline(num_nodes=num_nodes, rand_dim=td, seed=seed),
+                               lambda m: m(edge_index)),
+        "late_concat":        (lambda: FraudDetectionGraphSAGE(td, tt, fusion_mode="concat"),
+                               lambda m: m(x_text, edge_index, x_tab)),
+        "cross_attention":    (lambda: FraudDetectionGraphSAGE(td, tt, fusion_mode="cross_attention"),
+                               lambda m: m(x_text, edge_index, x_tab)),
+    }
+
+
 def train_one_model(model, forward_fn, y, train_mask, val_mask, test_mask,
                     pos_weight, cfg, device):
+    # Full-batch training with early stopping up to 200 epochs, using the validation set to tune the decision threshold for each model.
+    # The best checkpoint is loaded back into `model`; returns (test metrics, validation-tuned threshold, probabilities for all nodes).
     model = model.to(device)
     criterion = FocalLoss(gamma=cfg["gamma"], pos_weight=pos_weight)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg["lr"], weight_decay=1e-4)
@@ -83,7 +116,8 @@ def train_one_model(model, forward_fn, y, train_mask, val_mask, test_mask,
 
     best_val, best_state, patience_count = 0.0, None, 0
 
-    for epoch in range(cfg["epochs"]):
+    # Train the model for a maximum number of epochs, using early stopping based on validation performance.
+    for _ in range(cfg["epochs"]):
         model.train()
         optimizer.zero_grad()
         logits = forward_fn(model)
@@ -96,7 +130,6 @@ def train_one_model(model, forward_fn, y, train_mask, val_mask, test_mask,
         with torch.no_grad():
             probs = torch.sigmoid(forward_fn(model)).squeeze()
 
-        # val PR-AUC: threshold-free, used for early stopping and LR scheduling
         val_score = average_precision_score(
             y[val_mask].cpu().numpy(), probs[val_mask].cpu().numpy()
         )
@@ -111,135 +144,149 @@ def train_one_model(model, forward_fn, y, train_mask, val_mask, test_mask,
         if patience_count >= cfg["patience"]:
             break
 
-    if best_state is None:
-        print("[WARN] val score never improved; using final epoch weights.")
+    if best_state is None:  # validation score never improved: keep the last epoch
         best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
+    # Load the best model state and evaluate on the test set, tuning the decision threshold based on validation performance.
     model.load_state_dict(best_state)
     model.eval()
     with torch.no_grad():
         probs = torch.sigmoid(forward_fn(model)).squeeze().cpu().numpy()
 
+    # Convert the labels and masks to numpy arrays for threshold tuning and metric computation.
     y_np = y.cpu().numpy()
     val_np = val_mask.cpu().numpy()
     test_np = test_mask.cpu().numpy()
 
+    # Tune the decision threshold based on the validation set, and compute metrics on the test set using the tuned threshold.
     best_thresh, _ = tune_threshold(
         probs[val_np], y_np[val_np],
         cfg["threshold_steps"], cfg["beta"], cfg["threshold_min"],
     )
+    
+    # Compute the predicted probabilities and binary predictions for the test set using the tuned threshold,
+    # and calculate various classification metrics.
     test_probs = probs[test_np]
     test_preds = (test_probs >= best_thresh).astype(float)
     metrics = get_metrics(y_np[test_np], test_preds, test_probs)
     return metrics, best_thresh, probs
 
 
-def get_embeddings(df, col, max_len, path):
+def get_embeddings(df, col, max_len, log):
+    # Compute and cache DistilRoBERTa embeddings for the specified text column in the dataframe.
+    # Returns the 768-d text embeddings for df[col], cached.
+    texts = df[col].tolist()
+    key = hashlib.sha1("\x1f".join(texts).encode("utf-8")).hexdigest()[:10]
+    path = os.path.join("outputs", f"emb_{col}_{max_len}_{key}.npy")
     if os.path.exists(path):
-        e = np.load(path)
-        assert len(e) == len(df), f"{path} doesn't match the dataset; delete it."
-        return e
-    tm = DistilRobertaModule(DEVICE)
-    ds = JobTextDataset(df[col].values, df["label"].values, tm.tokenizer, max_len=max_len)
-    e = tm.extract_embeddings(DataLoader(ds, batch_size=16, shuffle=False))
-    np.save(path, e)
-    return e
+        log.event("embeddings", "loaded from cache", path=path)
+        return np.load(path)
+    t0 = time.time()
+    emb = DistilRobertaModule(DEVICE).embed_texts(texts, max_len=max_len)
+    np.save(path, emb)
+    log.event("embeddings", "computed and cached", path=path, shape=list(emb.shape),
+              seconds=round(time.time() - t0, 1))
+    return emb
 
 
-def run():
-    set_seed(CV_CONFIG["seed"])
+def load_inputs(log):
+    # Load and preprocess the input data, including text embeddings, tabular features, labels, and graph edge indices.
     os.makedirs("outputs", exist_ok=True)
-
-    df, edges_arr, _, _, _, tabular_features = load_and_split_data()
-    labels_arr = df["label"].values
-
-    emb_job = get_embeddings(df, "job_text", 512, "outputs/emb_job_512.npy")
-    emb_co = get_embeddings(df, "company_profile", 256, "outputs/emb_company_256.npy")
-    embeddings = get_embeddings(df, "full_text", 512, "outputs/emb_full_512.npy")
-
+    log.event("system", "hardware", **HARDWARE)
+    df, edges_arr, tabular_features = load_data(log)
+    embeddings = get_embeddings(df, "full_text", 512, log)
+    
+    # Convert the embeddings, tabular features, labels, and edge indices to PyTorch tensors and move them to the appropriate device for training.
     x_text = torch.tensor(embeddings, dtype=torch.float).to(GNN_DEVICE)
     x_tab = torch.tensor(tabular_features, dtype=torch.float).to(GNN_DEVICE)
-    y = torch.tensor(labels_arr, dtype=torch.float).to(GNN_DEVICE)
+    y = torch.tensor(df["label"].values, dtype=torch.float).to(GNN_DEVICE)
     edge_index = torch.tensor(edges_arr, dtype=torch.long).to(GNN_DEVICE)
-    num_nodes = x_text.shape[0]
-    td, tt = x_text.shape[1], x_tab.shape[1]
+    return df, x_text, x_tab, y, edge_index
 
-    results = {cond: [] for cond in CONDITIONS}
-    groups = df["group_id"].values if CV_CONFIG["split"] == "group" else None
 
-    for fold_i, train_mask, val_mask, test_mask in stratified_kfold_masks(
-        labels_arr, k=CV_CONFIG["k_folds"], seed=CV_CONFIG["seed"], groups=groups
-    ):
-        print(f"\n===== FOLD {fold_i + 1}/{CV_CONFIG['k_folds']} ({CV_CONFIG['split']} split) =====")
-        train_mask = train_mask.to(GNN_DEVICE)
-        val_mask = val_mask.to(GNN_DEVICE)
-        test_mask = test_mask.to(GNN_DEVICE)
-
-        num_licit = (y[train_mask] == 0).sum().item()
-        num_scam = (y[train_mask] == 1).sum().item()
-        capped = min(num_licit / max(num_scam, 1), CV_CONFIG["pos_weight_cap"])
-        pos_weight = torch.tensor([capped], dtype=torch.float).to(GNN_DEVICE)
-
-        def run_cond(make_model, fwd):
-            ms, first = [], None
-            final_model = None  # <-- 1. Create a tracker
-            for s in range(CV_CONFIG["n_seeds"]):
-                set_seed(CV_CONFIG["seed"] + 100 * s + fold_i)
-                
-                m_obj = make_model()  
-                
-                m, th, pr = train_one_model(
-                    m_obj, fwd, y, train_mask, val_mask, test_mask,
-                    pos_weight, CV_CONFIG, GNN_DEVICE,
-                )
-                ms.append(m)
-                if first is None:
-                    first = (th, pr)
-                
-                final_model = m_obj 
-                
-            return {k: float(np.mean([m[k] for m in ms])) for k in ms[0]}, first, final_model
-
-        conds = {
-            "distilroberta_only": (lambda: DistilRobertaOnlyClassifier(text_dim=td),
-                                   lambda m: m(x_text)),
-            "text_tabular":       (lambda: TextTabularMLP(td, tt),
-                                   lambda m: m(x_text, x_tab)),
-            "graphsage_only":     (lambda: GraphSAGEOnlyBaseline(num_nodes=num_nodes, rand_dim=td,
-                                                                 seed=CV_CONFIG["seed"]),
-                                   lambda m: m(edge_index)),
-            "late_concat":        (lambda: FraudDetectionGraphSAGE(td, tt, fusion_mode="concat"),
-                                   lambda m: m(x_text, edge_index, x_tab)),
-            "cross_attention":    (lambda: FraudDetectionGraphSAGE(td, tt, fusion_mode="cross_attention"),
-                                   lambda m: m(x_text, edge_index, x_tab)),
-        }
-
-        for name, (mk, fwd) in conds.items():
-            avg, (thresh, probs), trained_model = run_cond(mk, fwd)
-            
-            results[name].append(avg)
-            print(f"[{name:18s}] F1={avg['f1']:.4f} F2={avg['f2']:.4f} PR-AUC={avg['pr_auc']:.4f}")
-            
-            if name == "cross_attention":
-                results.setdefault("connectivity", []).append(
-                    connectivity_breakdown(probs, thresh, y, test_mask, edge_index)
-                )
-                save_path = f"outputs/cross_attention_fold_{fold_i + 1}.pt"
-                torch.save(trained_model.state_dict(), save_path)
-
-        # save after every fold so a crash doesn't lose finished folds
-        out_path = f"outputs/cv_results_{CV_CONFIG['split']}{CV_CONFIG['tag']}_seed{CV_CONFIG['seed']}.json"
-        with open(out_path, "w") as f:
-            json.dump({"config": CV_CONFIG, "timestamp": time.ctime(), "results": results}, f, indent=2)
-
-    print("\n===== SUMMARY (mean ± std across folds) =====")
-    summary_metrics = ["f1", "f2", "precision", "recall", "pr_auc", "mcc"]
+def _new_oof(labels, k):
+    # Create a new out-of-fold (OOF) predictions dictionary for cross-validation, initialized with zeros and -1 for fold indices.
+    n = len(labels)
+    oof = {"y": labels.astype(np.int8), "fold": np.full(n, -1, dtype=np.int8)}
     for cond in CONDITIONS:
-        parts = []
-        for m in summary_metrics:
-            vals = [r[m] for r in results[cond]]
-            parts.append(f"{m}={np.mean(vals):.3f}±{np.std(vals):.3f}")
-        print(f"{cond:20s} " + "  ".join(parts))
+        oof[f"probs_{cond}"] = np.zeros(n, dtype=np.float32)
+        oof[f"thresh_{cond}"] = np.zeros(k, dtype=np.float32)
+    return oof
+
+
+def run(split="random", seed=42):
+    # Run cross-validation training for the specified split type and random seed, logging results and saving out-of-fold predictions.
+    # The function performs k-fold cross-validation, trains multiple models for each fold, tunes thresholds, and saves results to disk.
+    # The results include metrics for each model, connectivity breakdowns, and out-of-fold predictions for further analysis.
+    # The function also handles logging and error reporting, ensuring that the training process is well-documented and reproducible.
+    cfg = {**CV_CONFIG, "split": split, "seed": seed}
+    
+    # Create a new RunLogger context for the cross-validation training run, which will log events and metrics throughout the process.
+    with RunLogger(f"train_cv_{split}_seed{seed}") as log:
+        set_seed(seed)
+        df, x_text, x_tab, y, edge_index = load_inputs(log)
+        labels = df["label"].values
+        groups = df["group_id"].values if split == "group" else None
         
+        results = {cond: [] for cond in CONDITIONS}
+        oof = _new_oof(labels, cfg["k_folds"])
+        results_path = os.path.join("outputs", f"cv_results_{split}{cfg['tag']}_seed{seed}.json")
+        oof_path = os.path.join("outputs", f"oof_{split}{cfg['tag']}_seed{seed}.npz")
+        log.event("cv", "starting", split=split, seed=seed, config=cfg)
+
+        # Iterate over each fold in the stratified k-fold cross-validation, training and evaluating models for each condition.
+        for fold_i, train_mask, val_mask, test_mask in stratified_kfold_masks(
+            labels, k=cfg["k_folds"], seed=seed, groups=groups
+        ):
+            train_mask, val_mask, test_mask = (m.to(GNN_DEVICE) for m in (train_mask, val_mask, test_mask))
+            pos_weight = compute_pos_weight(y, train_mask, cfg["pos_weight_cap"]).to(GNN_DEVICE)
+            test_np = test_mask.cpu().numpy()
+            conds = make_conditions(x_text, x_tab, edge_index, seed)
+
+            # Train and evaluate each model condition for the current fold, averaging results across multiple random seeds for robustness.
+            for name, (make_model, forward_fn) in conds.items():
+                per_seed, first = [], None
+                for s in range(cfg["n_seeds"]):
+                    set_seed(seed + 100 * s + fold_i)
+                    metrics, thresh, probs = train_one_model(
+                        make_model(), forward_fn, y, train_mask, val_mask, test_mask,
+                        pos_weight, cfg, GNN_DEVICE,
+                    )
+                    per_seed.append(metrics)
+                    if first is None:
+                        first = (thresh, probs)
+                avg = {k: float(np.mean([m[k] for m in per_seed])) for k in per_seed[0]}
+                thresh, probs = first
+                results[name].append(avg)
+
+                # out-of-fold predictions (first model seed): every posting is a test posting exactly once
+                oof["fold"][test_np] = fold_i
+                oof[f"probs_{name}"][test_np] = probs[test_np]
+                oof[f"thresh_{name}"][fold_i] = thresh
+
+                if name == "cross_attention":
+                    results.setdefault("connectivity", []).append(
+                        connectivity_breakdown(probs, thresh, y, test_mask, edge_index)
+                    )
+                log.event("fold", f"{name} done", fold=fold_i + 1, condition=name,
+                          f1=avg["f1"], f2=avg["f2"], mcc=avg["mcc"], pr_auc=avg["pr_auc"])
+
+            # saved after every fold, so a crash keeps the finished folds
+            with open(results_path, "w") as f:
+                json.dump({"config": cfg, "timestamp": time.ctime(), "results": results}, f, indent=2)
+            np.savez_compressed(oof_path, **oof)
+
+        summary = {
+            cond: {m: {"mean": float(np.mean([r[m] for r in results[cond]])),
+                       "std": float(np.std([r[m] for r in results[cond]]))}
+                   for m in SUMMARY_METRICS}
+            for cond in CONDITIONS
+        }
+        log.finish("ok", results_file=results_path, oof_file=oof_path, cv_summary=summary)
+
+
 if __name__ == "__main__":
-    run()
+    _split = sys.argv[1] if len(sys.argv) > 1 else CV_CONFIG["split"]
+    _seed = int(sys.argv[2]) if len(sys.argv) > 2 else CV_CONFIG["seed"]
+    assert _split in ("random", "group"), "split must be 'random' or 'group'"
+    run(_split, _seed)
