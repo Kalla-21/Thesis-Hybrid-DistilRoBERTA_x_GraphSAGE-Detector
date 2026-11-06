@@ -6,11 +6,11 @@
   <title>Enhancing the Detection of Online Recruitment Fraud</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Space+Mono&family=Black+Ops+One&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Space+Mono&family=Black+Ops+One&family=Poppins:wght@600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-olive: #818c6c;
-      --footer-green: #254422;
+      --bg-olive: #ffe6a0;
+      --footer-green: #2F3A2A;
       --accent: #e8b84f;
       --accent-dark: #b88a1f;
       --border: #9a9a9a;
@@ -47,7 +47,8 @@
       margin-bottom: 28px;
     }
     .logo { width: 56px; height: 56px; object-fit: contain; border-radius: 50%; }
-    .title { font-size: 1.35rem; font-weight: 400; text-align: center; line-height: 1.3; }
+    .title { font-family: "Poppins", var(--sans); font-size: clamp(1rem, calc((100vw - 330px) / 36), 1.85rem); font-weight: 600; text-align: center; line-height: 1.3; letter-spacing: 0.04em; white-space: nowrap; }
+    .title .subtitle { font-family: var(--mono); font-weight: 400; font-size: 0.65em; letter-spacing: 0.25em; }
 
     /* ---------- Layout ---------- */
     .content {
@@ -212,7 +213,7 @@
       .page { padding: 24px 16px 32px; }
       .content { grid-template-columns: 1fr; gap: 32px; }
       .header { gap: 12px; }
-      .title { font-size: 1rem; }
+      .title { font-size: 1rem; white-space: normal; }
       .logo { width: 40px; height: 40px; }
       .form-card { padding: 30px 20px 20px; }
       .form-footer { flex-direction: column; align-items: stretch; gap: 14px; }
@@ -229,7 +230,7 @@
     <!-- Header -->
     <header class="header">
       <img class="logo" src="images/Logo.png" alt="Bananalynn logo">
-      <h1 class="title">Enhancing the Detection of Online Recruitment Fraud<br>using DistilRoBERTa and GraphSAGE</h1>
+      <h1 class="title">Enhancing the Detection of Online Recruitment Fraud<br><span class="subtitle">using DistilRoBERTa and GraphSAGE</span></h1>
       <img class="logo" src="images/Logo.png" alt="Bananalynn logo">
     </header>
 
