@@ -228,9 +228,9 @@
 
     <!-- Header -->
     <header class="header">
-      <img class="logo" src="images/logo.png" alt="Bananalynn logo">
+      <img class="logo" src="images/Logo.png" alt="Bananalynn logo">
       <h1 class="title">Enhancing the Detection of Online Recruitment Fraud<br>using DistilRoBERTa and GraphSAGE</h1>
-      <img class="logo" src="images/logo.png" alt="Bananalynn logo">
+      <img class="logo" src="images/Logo.png" alt="Bananalynn logo">
     </header>
 
     <div class="content">
@@ -307,7 +307,7 @@
 
   <footer class="footer">
     <div class="footer-brand">
-      <img class="footer-logo" src="images/society-logo.png" alt="Bananalynn Research Society logo">
+      <img class="footer-logo" src="images/Logo.png" alt="Bananalynn Research Society logo">
       <span>Bananalynn Research Society</span>
     </div>
     <p class="copyright">@2026 Bananalynn Research Society - All rights Reserved</p>
@@ -398,7 +398,6 @@
         if (data.status === "success") renderExplanation(explainDiv, data);
         else explainDiv.append(el("p", { class: "hint" }, `Could not explain: ${data.detail}`));
       } catch (error) {
-        console.error("Explanation render error:", error);
         explainDiv.replaceChildren(el("p", { class: "hint" }, "Could not load the explanation."));
       }
     }
@@ -414,13 +413,13 @@
       renderGraph(root, d.graph);
       root.append(el("p", { class: "caveat" },
         "These are counterfactual explanations: they show what changes the score when part of the input is removed or changed. " +
-        "They describe the model's behaviour, not a look inside the network, and removing text can also shift " +
-        `which text falls inside the model's reading window. (Computed in ${d.seconds}s.)`));
+        "They describe the model's behaviour, not a look inside the network. The graph section reports linked-posting context, " +
+        `not an isolated graph contribution. (Computed in ${d.seconds}s.)`));
     }
 
     function renderFields(root, d) {
       root.append(el("h3", {}, "Which parts of the posting drive the score"));
-      root.append(el("p", { class: "hint" }, "Each field removed in turn (everything else, including the graph links, unchanged)."));
+      root.append(el("p", { class: "hint" }, "Each text field is removed in turn and the prediction is recomputed."));
       const maxAbs = Math.max(0.05, ...d.fields.filter(f => !f.empty).map(f => Math.abs(f.delta)));
       for (const f of d.fields) {
         const row = el("div", { class: "row" }, el("div", { class: "name" }, FIELD_LABELS[f.field]));
@@ -432,11 +431,8 @@
           const left = f.delta > 0 ? 50 : 50 - w;
           bar.append(el("div", { class: "fill", style:
             `left:${left}%; width:${w}%; background:rgb(${f.delta > 0 ? RED : GREEN})` }));
-          const [word, cls] = f.read_fraction === 0 ? ["not read by the model", "muted"] : direction(f.delta);
+          const [word, cls] = direction(f.delta);
           const value = el("div", { class: "value " + cls }, `${signed(f.delta)} · ${word}`);
-          if (f.read_fraction < 1) value.append(el("div", { class: "muted" },
-            f.read_fraction === 0 ? "cut off before the model reads it"
-                                  : `only ${Math.round(f.read_fraction * 100)}% of it is read`));
           row.append(bar, value);
         }
         root.append(row);
@@ -445,24 +441,28 @@
 
     function renderSentences(root, d) {
       root.append(el("h3", {}, "Sentence by sentence"));
-      const rl = d.read_limit;
+      const sentencePayload = d.sentences;
+      const sentences = Array.isArray(d.sentence_list) ? d.sentence_list
+                      : Array.isArray(sentencePayload) ? sentencePayload
+                      : Array.isArray(sentencePayload?.items) ? sentencePayload.items : [];
       root.append(el("p", { class: "hint" },
-        `Red = this sentence pushes toward scam, green = toward legitimate (hover for the number). ` +
-        (rl.truncated
-          ? `The model only reads the first ${rl.max_tokens} tokens of the posting; grey struck-through text comes after that and has no effect on the score.`
-          : `The whole posting fits in the model's ${rl.max_tokens}-token reading window.`)));
-      const scored = d.sentences.filter(s => s.delta !== undefined);
+        `Red = removing this sentence pushes toward scam; green = toward legitimate. ` +
+        (d.truncated ? `Showing the first ${sentences.length} of ${sentencePayload.total} sentences.`
+                     : `${sentences.length} sentences scored.`)));
+      const scored = sentences.filter(s => s.delta !== undefined);
       const maxAbs = Math.max(0.02, ...scored.map(s => Math.abs(s.delta)));
-      for (const field of Object.keys(FIELD_LABELS)) {
-        const sents = d.sentences.filter(s => s.field === field);
-        if (!sents.length) continue;
+      const groups = new Map();
+      for (const sentence of sentences) {
+        const field = sentence.field;
+        const label = FIELD_LABELS[field] || "Text";
+        if (!groups.has(label)) groups.set(label, []);
+        groups.get(label).push(sentence);
+      }
+      for (const [label, sents] of groups) {
         const p = el("div", { class: "sentences" });
         for (const s of sents) {
-          const span = el("span", {}, s.text + " ");
-          if (!s.read) {
-            span.className = "unread";
-            span.title = "beyond the model's reading window — not used";
-          } else if (s.delta !== undefined) {
+          const span = el("span", {}, (s.text || s.sentence || "") + " ");
+          if (s.delta !== undefined) {
             const strength = Math.min(1, Math.abs(s.delta) / maxAbs) * 0.65;
             span.style.background = `rgba(${s.delta > 0 ? RED : GREEN}, ${strength.toFixed(2)})`;
             span.title = `removing this sentence changes the score by ${signed(-s.delta)} (${direction(s.delta)[0]})`;
@@ -471,7 +471,7 @@
           }
           p.append(span);
         }
-        root.append(el("div", { class: "field-label" }, FIELD_LABELS[field]), p);
+        root.append(el("div", { class: "field-label" }, label), p);
       }
     }
 
@@ -491,60 +491,21 @@
       root.append(table);
     }
 
-    function renderGraph(root, g) {
+    function renderGraph(root, g = {}) {
       root.append(el("h3", {}, "The graph (similar postings)"));
-      const [word, cls] = direction(g.delta);
-      root.append(el("p", {}, "Score with graph: ", el("b", {}, g.score_with_graph.toFixed(3)),
-        " · without: ", el("b", {}, g.score_without_graph.toFixed(3)), " · ",
-        el("span", { class: cls }, `${signed(g.delta)} (${word})`)));
-      if (g.linked === 0) {
+      const linked = g.linked ?? g.n_neighbors ?? 0;
+      if (linked === 0) {
         root.append(el("p", { class: "hint" },
-          "This posting has the same company profile text and the same title as no posting in the training data, " +
-          "so the graph part of the model had nothing to learn from and the result rests on the text and settings alone."));
+          "No similar postings were linked by company profile, title, or contact information."));
         return;
       }
-      let summary = `Linked to ${g.linked} posting${g.linked === 1 ? "" : "s"} ` +
-        `(${g.by_company} with the same company profile, ${g.by_title} with the same title).`;
-      if (g.has_labels) summary += ` In the dataset, ${g.scam_neighbours} of them were scams. ` +
-        `(The model never sees these labels — only the neighbours' text.)`;
+      const byLink = g.by_link || g.neighbors_by_link || {};
+      const labeledScams = g.scam_neighbours ?? g.neighbors_known_fraud;
+      let summary = `Linked to ${linked} similar posting${linked === 1 ? "" : "s"} ` +
+        `(${byLink.company || 0} by company profile, ${byLink.title || 0} by title, ${byLink.contact || 0} by contact).`;
+      if (labeledScams !== undefined) summary += ` ${labeledScams} ${labeledScams === 1 ? "is" : "are"} labeled fraudulent in the reference data; ` +
+        "these labels are context only, not model input.";
       root.append(el("p", { class: "hint" }, summary));
-      root.append(drawGraph(g));
-      const legend = el("div", { class: "legend hint" }, "Hover a circle for its title.");
-      for (const [colour, label] of g.has_labels ? [["#c0392b", "scam"], ["#1e8449", "legitimate"]] : [["#888", "similar posting"]])
-        legend.append(el("span", { class: "dot", style: `background:${colour}` }), label);
-      if (g.linked > g.shown.length) legend.append(` · showing ${g.shown.length} of ${g.linked}`);
-      root.append(legend);
-    }
-
-    function drawGraph(g) {
-      const NS = "http://www.w3.org/2000/svg", W = 560, H = 320, cx = W / 2, cy = H / 2;
-      const svg = document.createElementNS(NS, "svg");
-      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-      const add = (tag, attrs, text) => {
-        const n = document.createElementNS(NS, tag);
-        for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
-        if (text) n.textContent = text;
-        svg.append(n); return n;
-      };
-      const n = g.shown.length, inner = Math.min(n, 12);
-      const pos = g.shown.map((_, i) => {
-        const ring = i < inner ? 0 : 1;
-        const count = ring ? n - inner : inner, k = ring ? i - inner : i;
-        const a = (k / Math.max(1, count)) * 2 * Math.PI + (ring ? Math.PI / count : 0);
-        const rx = ring ? 250 : 150, ry = ring ? 135 : 80;
-        return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)];
-      });
-      pos.forEach(([x, y]) => add("line", { x1: cx, y1: cy, x2: x, y2: y, stroke: "#ccc", "stroke-width": 1 }));
-      g.shown.forEach((nb, i) => {
-        const colour = nb.label === null ? "#888" : nb.label ? "#c0392b" : "#1e8449";
-        const c = add("circle", { cx: pos[i][0], cy: pos[i][1], r: 7, fill: colour });
-        const tip = (nb.title || "(title not available)") + " — " + nb.reasons.join(", ") +
-          (nb.label === null ? "" : nb.label ? " — scam" : " — legitimate");
-        const t = document.createElementNS(NS, "title"); t.textContent = tip; c.append(t);
-      });
-      add("circle", { cx, cy, r: 16, fill: "#007bff" });
-      add("text", { x: cx, y: cy + 4, "text-anchor": "middle", fill: "white", "font-size": 10 }, "this");
-      return svg;
     }
   </script>
 </body>

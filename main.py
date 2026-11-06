@@ -133,26 +133,30 @@ def explain_prediction(job: JobInput):
             flags_dict[flag] = delta
 
         # 3. Sentence-level ablation
-        raw_desc = (posting.get("description") or "") + " " + (posting.get("requirements") or "") + " " + (posting.get("company_profile") or "")
-        raw_sentences = [s.strip() for s in _SPLIT.split(raw_desc) if len(s.strip()) > 5]
+        raw_sentences = [
+            (field, sentence.strip())
+            for field in ("description", "requirements", "company_profile")
+            for sentence in _SPLIT.split(posting.get(field) or "")
+            if len(sentence.strip()) > 5
+        ]
         
         max_sents = 10
         is_truncated = len(raw_sentences) > max_sents
         eval_sentences = raw_sentences[:max_sents]
 
         sentence_rows = []
-        for s in eval_sentences:
+        for field, sentence in eval_sentences:
             mod_posting = posting.copy()
-            if posting.get("description"):
-                mod_posting["description"] = posting["description"].replace(s, "")
+            mod_posting[field] = (posting.get(field) or "").replace(sentence, "", 1)
             
             score_without = round(evelynn_engine.predict(mod_posting)["probability"], 4)
             delta = round(base_score - score_without, 4)
             
             sentence_rows.append({
-                "sentence": s,
-                "text": s,
-                "content": s,
+                "field": field,
+                "sentence": sentence,
+                "text": sentence,
+                "content": sentence,
                 "score_without": score_without,
                 "delta": delta,
                 "impact": delta,
