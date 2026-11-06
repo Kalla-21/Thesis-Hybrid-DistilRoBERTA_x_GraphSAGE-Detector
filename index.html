@@ -6,11 +6,11 @@
   <title>Enhancing the Detection of Online Recruitment Fraud</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Space+Mono&family=Black+Ops+One&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Space+Mono&family=Black+Ops+One&family=Poppins:wght@600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-olive: #818c6c;
-      --footer-green: #254422;
+      --bg-olive: #ffe6a0;
+      --footer-green: #2F3A2A;
       --accent: #e8b84f;
       --accent-dark: #b88a1f;
       --border: #9a9a9a;
@@ -30,6 +30,20 @@
       min-height: 100vh;
     }
 
+    /* the code below can be uncommented to use a background; also change the url to change the image */
+    /* body {
+      font-family: var(--sans);
+      color: var(--text);
+      background-image: url('images/brown.jpg');
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      background-attachment: fixed;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    } */
+
     .page {
       flex: 1;
       width: 100%;
@@ -47,7 +61,8 @@
       margin-bottom: 28px;
     }
     .logo { width: 56px; height: 56px; object-fit: contain; border-radius: 50%; }
-    .title { font-size: 1.35rem; font-weight: 400; text-align: center; line-height: 1.3; }
+    .title { font-family: "Poppins", var(--sans); font-size: clamp(1rem, calc((100vw - 330px) / 36), 1.85rem); font-weight: 600; text-align: center; line-height: 1.3; letter-spacing: 0.04em; white-space: nowrap; }
+    .title .subtitle { font-family: var(--mono); font-weight: 400; font-size: 0.65em; letter-spacing: 0.25em; }
 
     /* ---------- Layout ---------- */
     .content {
@@ -212,7 +227,7 @@
       .page { padding: 24px 16px 32px; }
       .content { grid-template-columns: 1fr; gap: 32px; }
       .header { gap: 12px; }
-      .title { font-size: 1rem; }
+      .title { font-size: 1rem; white-space: normal; }
       .logo { width: 40px; height: 40px; }
       .form-card { padding: 30px 20px 20px; }
       .form-footer { flex-direction: column; align-items: stretch; gap: 14px; }
@@ -229,7 +244,7 @@
     <!-- Header -->
     <header class="header">
       <img class="logo" src="images/Logo.png" alt="Bananalynn logo">
-      <h1 class="title">Enhancing the Detection of Online Recruitment Fraud<br>using DistilRoBERTa and GraphSAGE</h1>
+      <h1 class="title">Enhancing the Detection of Online Recruitment Fraud<br><span class="subtitle">using DistilRoBERTa and GraphSAGE</span></h1>
       <img class="logo" src="images/Logo.png" alt="Bananalynn logo">
     </header>
 
@@ -289,7 +304,7 @@
         <section class="card analysis-card">
           <h2>Model’s Analysis</h2>
           <hr>
-          <p class="small">It’s a...</p>
+          <p class="small">It is...</p>
           <div id="result" class="verdict msg">—</div>
           <div id="detail"></div>
         </section>
@@ -333,7 +348,8 @@
     const signed = d => (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d).toFixed(3);
     // delta = score as written minus score with that thing changed; positive pushes toward "scam"
     const direction = d => Math.abs(d) < 0.005 ? ["no real effect", "muted"]
-                         : d > 0 ? ["pushes toward scam", "toward-scam"] : ["pushes toward legitimate", "toward-legit"];
+           : d > 0 ? ["pushes the score toward fraud", "toward-scam"]
+             : ["pushes the score toward legitimate", "toward-legit"];
 
     // state: "scam" | "legit" | "msg" (small plain text for status / errors)
     function setResult(text, state) {
@@ -373,8 +389,8 @@
         if (data.status === "success") {
           // The score is the raw model output, not a calibrated probability: the model was
           // trained with a tuned decision threshold, so compare against that, not 50%.
-          setResult(data.is_scam ? "SCAM" : "LEGIT", data.is_scam ? "scam" : "legit");
-          detailDiv.innerText = `Model score ${data.score} (scam if ≥ ${data.threshold}). ` +
+          setResult(data.is_scam ? "Fraud" : "Legit", data.is_scam ? "scam" : "legit");
+          detailDiv.innerText = `Model score ${data.score} (fraud if ≥ ${data.threshold}). ` +
             `Linked to ${data.linked_postings} similar postings in the training graph.`;
         } else {
           setResult(`Error: ${data.detail}`, "msg");
@@ -406,7 +422,8 @@
       root.append(el("h2", {}, "Why this result?"));
       root.append(el("p", { class: "hint" },
         `Each number below is the model's score for the posting as written, minus its score with one thing changed. ` +
-        `Positive pushes toward “scam”, negative toward “legitimate”. (Scam if score ≥ ${d.threshold}; this posting: ${d.score}.)`));
+        `Positive pushes the score toward fraud, negative toward legitimate. ` +
+        `(Fraud if score ≥ ${d.threshold}; this posting: ${d.score}.)`));
       renderFields(root, d);
       renderSentences(root, d);
       renderFlags(root, d);
@@ -446,7 +463,7 @@
                       : Array.isArray(sentencePayload) ? sentencePayload
                       : Array.isArray(sentencePayload?.items) ? sentencePayload.items : [];
       root.append(el("p", { class: "hint" },
-        `Red = removing this sentence pushes toward scam; green = toward legitimate. ` +
+        `Red = this sentence pushes the score toward fraud; green = toward legitimate. ` +
         (d.truncated ? `Showing the first ${sentences.length} of ${sentencePayload.total} sentences.`
                      : `${sentences.length} sentences scored.`)));
       const scored = sentences.filter(s => s.delta !== undefined);
@@ -465,7 +482,7 @@
           if (s.delta !== undefined) {
             const strength = Math.min(1, Math.abs(s.delta) / maxAbs) * 0.65;
             span.style.background = `rgba(${s.delta > 0 ? RED : GREEN}, ${strength.toFixed(2)})`;
-            span.title = `removing this sentence changes the score by ${signed(-s.delta)} (${direction(s.delta)[0]})`;
+            span.title = `Keeping this sentence changes the score by ${signed(s.delta)} compared with removing it (${direction(s.delta)[0]}).`;
           } else {
             span.title = "not scored (limit on sentences per explanation)";
           }
@@ -503,7 +520,7 @@
       const labeledScams = g.scam_neighbours ?? g.neighbors_known_fraud;
       let summary = `Linked to ${linked} similar posting${linked === 1 ? "" : "s"} ` +
         `(${byLink.company || 0} by company profile, ${byLink.title || 0} by title, ${byLink.contact || 0} by contact).`;
-      if (labeledScams !== undefined) summary += ` ${labeledScams} ${labeledScams === 1 ? "is" : "are"} labeled fraudulent in the reference data; ` +
+      if (labeledScams !== undefined) summary += ` ${labeledScams} ${labeledScams === 1 ? "is" : "are"} labeled as fraud in the reference data; ` +
         "these labels are context only, not model input.";
       root.append(el("p", { class: "hint" }, summary));
     }
