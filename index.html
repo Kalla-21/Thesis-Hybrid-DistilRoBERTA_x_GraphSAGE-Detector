@@ -162,8 +162,8 @@
     .verdict.scam,
     .verdict.legit {
       font-family: "Black Ops One", Impact, sans-serif;
-      font-size: 4rem;
-      letter-spacing: 2px;
+      font-size: 2.6rem;
+      letter-spacing: 1px;
     }
     .verdict.scam  { color: var(--accent); -webkit-text-stroke: 2px var(--accent-dark); }
     .verdict.legit { color: #3f9a4a;       -webkit-text-stroke: 2px #25602d; }
@@ -282,7 +282,7 @@
           <div class="checks">
             <label class="check">
               <input type="checkbox" id="telecommuting">
-              <span>This listing has Telecommunication</span>
+              <span>This is a remote (telecommuting) job</span>
             </label>
             <label class="check">
               <input type="checkbox" id="has_logo">
@@ -304,7 +304,7 @@
         <section class="card analysis-card">
           <h2>Model’s Analysis</h2>
           <hr>
-          <p class="small">It is...</p>
+          <p class="small">Screening result:</p>
           <div id="result" class="verdict msg">—</div>
           <div id="detail"></div>
         </section>
@@ -346,10 +346,10 @@
       return node;
     }
     const signed = d => (d > 0 ? "+" : d < 0 ? "−" : "") + Math.abs(d).toFixed(3);
-    // delta = score as written minus score with that thing changed; positive pushes toward "scam"
+    // delta = score as written minus score with that thing changed; positive raises the score
     const direction = d => Math.abs(d) < 0.005 ? ["no real effect", "muted"]
-           : d > 0 ? ["pushes the score toward fraud", "toward-scam"]
-             : ["pushes the score toward legitimate", "toward-legit"];
+           : d > 0 ? ["raises the score", "toward-scam"]
+             : ["lowers the score", "toward-legit"];
 
     // state: "scam" | "legit" | "msg" (small plain text for status / errors)
     function setResult(text, state) {
@@ -389,9 +389,9 @@
         if (data.status === "success") {
           // The score is the raw model output, not a calibrated probability: the model was
           // trained with a tuned decision threshold, so compare against that, not 50%.
-          setResult(data.is_scam ? "Fraud" : "Legit", data.is_scam ? "scam" : "legit");
-          detailDiv.innerText = `Model score ${data.score} (fraud if ≥ ${data.threshold}). ` +
-            `Linked to ${data.linked_postings} similar postings in the training graph.`;
+          setResult(data.is_scam ? "Likely fraudulent" : "Likely legitimate", data.is_scam ? "scam" : "legit");
+          detailDiv.innerText = `Model score ${data.score} (likely fraudulent if ≥ ${data.threshold}). ` +
+            `Linked to ${data.linked_postings} similar posting${data.linked_postings === 1 ? "" : "s"} in the training graph.`;
         } else {
           setResult(`Error: ${data.detail}`, "msg");
           return;
@@ -422,8 +422,8 @@
       root.append(el("h2", {}, "Why this result?"));
       root.append(el("p", { class: "hint" },
         `Each number below is the model's score for the posting as written, minus its score with one thing changed. ` +
-        `Positive pushes the score toward fraud, negative toward legitimate. ` +
-        `(Fraud if score ≥ ${d.threshold}; this posting: ${d.score}.)`));
+        `Positive = raises the score (makes it look more like the scams the model was trained on); negative = lowers it. ` +
+        `(Likely fraudulent if score ≥ ${d.threshold}; this posting: ${d.score}.)`));
       renderFields(root, d);
       renderSentences(root, d);
       renderFlags(root, d);
@@ -463,7 +463,7 @@
                       : Array.isArray(sentencePayload) ? sentencePayload
                       : Array.isArray(sentencePayload?.items) ? sentencePayload.items : [];
       root.append(el("p", { class: "hint" },
-        `Red = this sentence pushes the score toward fraud; green = toward legitimate. ` +
+        `Red = this sentence raises the score; green = lowers it. ` +
         (d.truncated ? `Showing the first ${sentences.length} of ${sentencePayload.total} sentences.`
                      : `${sentences.length} sentences scored.`)));
       const scored = sentences.filter(s => s.delta !== undefined);
