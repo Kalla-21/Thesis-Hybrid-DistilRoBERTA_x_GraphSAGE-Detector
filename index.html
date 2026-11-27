@@ -209,6 +209,62 @@
     .legend span.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 4px 0 12px; }
     #explain svg { max-width: 100%; height: auto; background: #fafafa; border: 1px solid #eee; border-radius: 4px; }
 
+    /* ---------- Graded posting: after Verify, the posting itself is coloured in place ---------- */
+    .graded {
+      display: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      min-height: 88px;
+      font-family: var(--sans);
+      font-size: 0.9rem;
+      line-height: 1.8;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      background: #fff;
+    }
+    .graded.one-line { min-height: 38px; padding: 7px 12px; }
+    .graded .empty { color: #999; font-style: italic; }
+    .graded .sent { border-radius: 3px; padding: 2px 0; cursor: help; }
+    .val {
+      display: inline-block;
+      margin: 0 3px 0 4px;
+      padding: 0 5px;
+      border: 1px solid currentColor;
+      border-radius: 9px;
+      background: #fff;
+      font-family: var(--sans);
+      font-size: 0.72em;
+      font-weight: 700;
+      line-height: 1.5;
+      white-space: nowrap;
+      vertical-align: 1px;
+    }
+    .grade-chip {
+      position: absolute;
+      top: -7px;
+      right: 24px;
+      padding: 0 6px;
+      background: #fff;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      line-height: 1;
+      z-index: 1;
+    }
+    .grade-legend { display: none; margin: -18px 0 24px; padding: 10px 14px; border-radius: 6px; background: #f7f5ee; font-size: 0.8rem; line-height: 1.55; color: #333; }
+    .grade-legend strong { font-size: 0.95rem; }
+    .grade-legend .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin: 0 4px 0 0; }
+    .form-card.graded-mode .grade-legend,
+    .form-card.graded-mode .graded { display: block; }
+    .form-card.graded-mode .field > input[type="text"],
+    .form-card.graded-mode .field > textarea { display: none; }
+    .check .val { font-size: 0.95em; margin-left: 2px; }
+    .form-card.graded-mode .checks { grid-template-columns: auto; }
+    .form-buttons { display: flex; gap: 10px; flex: none; }
+    .form-buttons button { white-space: nowrap; }
+    .edit-btn { display: none; background: #fff; border: 1px solid var(--border); border-radius: 5px; padding: 6px 18px; font-family: var(--mono); font-size: 0.8rem; cursor: pointer; }
+    .form-card.graded-mode .edit-btn { display: inline-block; }
+
     /* ---------- Footer ---------- */
     .footer {
       background: var(--footer-green);
@@ -253,6 +309,8 @@
       <!-- Left: input form -->
       <section class="card form-card">
 
+        <div id="grade-legend" class="grade-legend"></div>
+
         <div class="field">
           <label for="title">Job Title</label>
           <input type="text" id="title">
@@ -293,7 +351,10 @@
               <span>This listing has questions</span>
             </label>
           </div>
-          <button type="button" class="verify-btn" onclick="checkScam()">Verify</button>
+          <div class="form-buttons">
+            <button type="button" class="edit-btn" onclick="setGraded(false)">Edit text</button>
+            <button type="button" class="verify-btn" onclick="checkScam()">Verify</button>
+          </div>
         </div>
 
       </section>
@@ -334,6 +395,15 @@
                            requirements: "Requirements", benefits: "Benefits" };
     const FLAG_LABELS = { telecommuting: "Telecommuting", has_company_logo: "Has logo", has_questions: "Has questions" };
     const RED = "192, 57, 43", GREEN = "30, 132, 73";
+    const TEXT_FIELDS = ["title", "company_profile", "description", "requirements", "benefits"];
+    const FLAG_INPUTS = { telecommuting: "telecommuting", has_company_logo: "has_logo", has_questions: "has_questions" };
+    const formCard = document.querySelector(".form-card");
+
+    // one read-only "graded" view per text field, shown in place of the input after Verify
+    for (const f of TEXT_FIELDS) {
+      document.getElementById(f).after(
+        Object.assign(document.createElement("div"), { id: `${f}-graded`, className: "graded" + (f === "title" ? " one-line" : "") }));
+    }
 
     function el(tag, attrs = {}, ...children) {
       const node = document.createElement(tag);
@@ -358,7 +428,25 @@
       resultDiv.className = "verdict " + state;
     }
 
+    // graded mode: the posting is shown coloured in place; "Edit text" switches back to the inputs
+    function setGraded(on) {
+      formCard.classList.toggle("graded-mode", on);
+      if (!on) document.querySelectorAll(".grade-chip, .check .val").forEach(n => n.remove());
+    }
+
+    // inputs are frozen while the posting is scored, so the colours always match the text shown
+    function setLocked(locked) {
+      for (const f of TEXT_FIELDS) document.getElementById(f).readOnly = locked;
+      for (const id of Object.values(FLAG_INPUTS)) document.getElementById(id).disabled = locked;
+    }
+
     async function checkScam() {
+      setGraded(false);
+      setLocked(true);
+      try { await runCheck(); } finally { setLocked(false); }
+    }
+
+    async function runCheck() {
       const detailDiv = document.getElementById('detail');
       const explainDiv = document.getElementById('explain');
       setResult("Analyzing...", "msg");
@@ -402,7 +490,8 @@
       }
 
       // Second request: why? (re-scores the posting with parts removed, so it takes a few seconds)
-      explainDiv.append(el("p", { class: "hint" }, "Working out why — this re-scores the posting several times…"));
+      explainDiv.append(el("p", { class: "hint" },
+        "Working out why — the posting is re-scored once for every field, setting and sentence, so longer postings take longer…"));
       try {
         const response = await fetch(`${API}/explain`, {
           method: 'POST',
@@ -411,7 +500,11 @@
         });
         const data = await response.json();
         explainDiv.replaceChildren();
-        if (data.status === "success") renderExplanation(explainDiv, data);
+        if (data.status === "success") {
+          renderExplanation(explainDiv, data);
+          renderInPlace(data);
+          setGraded(true);
+        }
         else explainDiv.append(el("p", { class: "hint" }, `Could not explain: ${data.detail}`));
       } catch (error) {
         explainDiv.replaceChildren(el("p", { class: "hint" }, "Could not load the explanation."));
@@ -425,7 +518,7 @@
         `Positive = raises the score (makes it look more like the scams the model was trained on); negative = lowers it. ` +
         `(Likely fraudulent if score ≥ ${d.threshold}; this posting: ${d.score}.)`));
       renderFields(root, d);
-      renderSentences(root, d);
+      renderSentenceSummary(root, d);
       renderFlags(root, d);
       renderGraph(root, d.graph);
       root.append(el("p", { class: "caveat" },
@@ -456,40 +549,82 @@
       }
     }
 
-    function renderSentences(root, d) {
+    // The sentences themselves are coloured on the posting (left); the panel only points there
+    // and names the strongest sentence in each direction.
+    function renderSentenceSummary(root, d) {
       root.append(el("h3", {}, "Sentence by sentence"));
-      const sentencePayload = d.sentences;
-      const sentences = Array.isArray(d.sentence_list) ? d.sentence_list
-                      : Array.isArray(sentencePayload) ? sentencePayload
-                      : Array.isArray(sentencePayload?.items) ? sentencePayload.items : [];
+      const sents = Array.isArray(d.sentence_list) ? d.sentence_list : [];
+      if (!sents.length) {
+        root.append(el("p", { class: "hint" }, "No sentences to score."));
+        return;
+      }
       root.append(el("p", { class: "hint" },
-        `Red = this sentence raises the score; green = lowers it. ` +
-        (d.truncated ? `Showing the first ${sentences.length} of ${sentencePayload.total} sentences.`
-                     : `${sentences.length} sentences scored.`)));
-      const scored = sentences.filter(s => s.delta !== undefined);
-      const maxAbs = Math.max(0.02, ...scored.map(s => Math.abs(s.delta)));
-      const groups = new Map();
-      for (const sentence of sentences) {
-        const field = sentence.field;
-        const label = FIELD_LABELS[field] || "Text";
-        if (!groups.has(label)) groups.set(label, []);
-        groups.get(label).push(sentence);
+        `All ${sents.length} sentence${sents.length === 1 ? " is" : "s are"} coloured on the posting itself, on the left. ` +
+        "Hover over a sentence there to see the score with and without it."));
+      const up = sents.reduce((a, s) => (s.delta > (a ? a.delta : 0) ? s : a), null);
+      const down = sents.reduce((a, s) => (s.delta < (a ? a.delta : 0) ? s : a), null);
+      const short = t => (t.length > 90 ? t.slice(0, 87).trimEnd() + "…" : t);
+      for (const [s, label] of [[up, "Raises the score most"], [down, "Lowers the score most"]]) {
+        if (!s || Math.abs(s.delta) < 0.005) continue;
+        root.append(el("p", { class: "hint" },
+          el("strong", {}, `${label}: `), el("span", { class: direction(s.delta)[1] }, signed(s.delta)), ` “${short(s.sentence)}”`));
       }
-      for (const [label, sents] of groups) {
-        const p = el("div", { class: "sentences" });
-        for (const s of sents) {
-          const span = el("span", {}, (s.text || s.sentence || "") + " ");
-          if (s.delta !== undefined) {
-            const strength = Math.min(1, Math.abs(s.delta) / maxAbs) * 0.65;
-            span.style.background = `rgba(${s.delta > 0 ? RED : GREEN}, ${strength.toFixed(2)})`;
-            span.title = `Keeping this sentence changes the score by ${signed(s.delta)} compared with removing it (${direction(s.delta)[0]}).`;
-          } else {
-            span.title = "not scored (limit on sentences per explanation)";
+    }
+
+    // Colour each field of the posting in place, sentence by sentence, with the value after each.
+    function renderInPlace(d) {
+      const segs = d.segments || {};
+      const scored = Object.values(segs).flat().filter(p => p.delta !== undefined);
+      const maxAbs = Math.max(0.02, ...scored.map(p => Math.abs(p.delta)));
+      for (const f of TEXT_FIELDS) {
+        const view = document.getElementById(`${f}-graded`);
+        view.replaceChildren();
+        const parts = segs[f] || [{ text: document.getElementById(f).value }];
+        if (!parts.map(p => p.text).join("").trim()) view.append(el("span", { class: "empty" }, "left empty"));
+        for (const p of parts) {
+          if (p.delta === undefined) {
+            view.append(p.text);
+            continue;
           }
-          p.append(span);
+          const what = f === "title" ? "the title" : "this sentence";
+          const strength = Math.min(1, Math.abs(p.delta) / maxAbs) * 0.65;
+          const span = el("span", { class: "sent" }, p.text);
+          span.style.background = `rgba(${p.delta > 0 ? RED : GREEN}, ${strength.toFixed(2)})`;
+          span.title = `Score as written: ${d.score}. Score without ${what}: ${p.score_without}. ` +
+                       `So ${what} ${direction(p.delta)[0]} (${signed(p.delta)}).`;
+          view.append(span);
+          if (Math.abs(p.delta) >= 0.005) view.append(el("span", { class: "val " + direction(p.delta)[1] }, signed(p.delta)));
         }
-        root.append(el("div", { class: "field-label" }, label), p);
+        // the whole field's value sits on the box's border, opposite the field name
+        const row = (d.fields || []).find(r => r.field === f);
+        if (row && !row.empty) {
+          const [word, cls] = direction(row.delta);
+          view.parentElement.append(el("span", { class: "grade-chip " + cls }, `whole field ${signed(row.delta)} · ${word}`));
+        }
       }
+      // each yes/no setting gets its effect next to its checkbox
+      for (const fl of d.flags || []) {
+        const box = document.getElementById(FLAG_INPUTS[fl.flag]);
+        const label = box && box.closest(".check");
+        if (!label) continue;
+        const [word, cls] = direction(fl.delta);
+        const v = el("span", { class: "val " + cls }, signed(fl.delta));
+        v.title = `Score if this setting were flipped: ${fl.score_if_flipped}. Effect of the current choice: ${word}.`;
+        label.append(v);
+      }
+      renderLegend(d);
+    }
+
+    function renderLegend(d) {
+      const verdict = d.is_fraud ? "Likely fraudulent" : "Likely legitimate";
+      document.getElementById("grade-legend").replaceChildren(
+        el("strong", {}, `${verdict}: score ${d.score} (flagged at ${d.threshold} or above)`), el("br"),
+        el("span", { class: "swatch", style: `background: rgba(${RED}, 0.5)` }),
+        el("span", { style: "margin-right: 16px" }, "raises the score"),
+        el("span", { class: "swatch", style: `background: rgba(${GREEN}, 0.5)` }),
+        el("span", {}, "lowers the score (darker = stronger)"), el("br"),
+        "Each number = the score as written minus the score without that sentence. " +
+        "No number = under 0.005, no real effect. Hover over any sentence for its two scores.");
     }
 
     function renderFlags(root, d) {

@@ -45,7 +45,33 @@ class JobInput(BaseModel):
 
 FIELDS = ["title", "company_profile", "description", "requirements", "benefits"]
 FLAGS = ["telecommuting", "has_company_logo", "has_questions"]
+# fields whose sentences are scored one by one (the title is scored as a whole field)
+SENTENCE_FIELDS = ["description", "requirements", "company_profile", "benefits"]
 _SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _pieces(text):
+    """Split text into (start, end, is_sentence) spans that cover it exactly, in order.
+    A sentence is a piece between splits whose stripped length is over 5 characters;
+    whitespace, separators and shorter fragments are returned as unscored spans."""
+    spans, pos = [], 0
+    bounds = [(m.start(), m.end()) for m in _SPLIT.finditer(text)] + [(len(text), len(text))]
+    for sep_start, sep_end in bounds:
+        piece = text[pos:sep_start]
+        s = pos + (len(piece) - len(piece.lstrip()))
+        e = sep_start - (len(piece) - len(piece.rstrip()))
+        if e - s > 5:
+            if s > pos:
+                spans.append((pos, s, False))
+            spans.append((s, e, True))
+            if sep_start > e:
+                spans.append((e, sep_start, False))
+        elif sep_start > pos:
+            spans.append((pos, sep_start, False))
+        if sep_end > sep_start:
+            spans.append((sep_start, sep_end, False))
+        pos = sep_end
+    return spans
 
 
 @app.post("/predict")
@@ -132,41 +158,52 @@ def explain_prediction(job: JobInput):
             })
             flags_dict[flag] = delta
 
-        # 3. Sentence-level ablation
-        raw_sentences = [
-            (field, sentence.strip())
-            for field in ("description", "requirements", "company_profile")
-            for sentence in _SPLIT.split(posting.get(field) or "")
-            if len(sentence.strip()) > 5
-        ]
-        
-        max_sents = 10
-        is_truncated = len(raw_sentences) > max_sents
-        eval_sentences = raw_sentences[:max_sents]
-
+        # 3. Sentence-level ablation: every sentence is removed in turn and the posting re-scored.
+        # Each field also comes back as "segments" that rebuild its text exactly, so the page
+        # can colour the posting in place; gaps and short fragments carry no score.
         sentence_rows = []
-        for field, sentence in eval_sentences:
-            mod_posting = posting.copy()
-            mod_posting[field] = (posting.get(field) or "").replace(sentence, "", 1)
-            
-            score_without = round(evelynn_engine.predict(mod_posting)["probability"], 4)
-            delta = round(base_score - score_without, 4)
-            
-            sentence_rows.append({
-                "field": field,
-                "sentence": sentence,
-                "text": sentence,
-                "content": sentence,
-                "score_without": score_without,
-                "delta": delta,
-                "impact": delta,
-                "truncated": False
-            })
+        segments = {}
+        for field in SENTENCE_FIELDS:
+            text = posting.get(field) or ""
+            segs = []
+            for s, e, is_sentence in _pieces(text):
+                chunk = text[s:e]
+                if not is_sentence:
+                    if segs and "delta" not in segs[-1]:
+                        segs[-1]["text"] += chunk
+                    else:
+                        segs.append({"text": chunk})
+                    continue
 
+                mod_posting = posting.copy()
+                mod_posting[field] = text[:s] + text[e:]
+                score_without = round(evelynn_engine.predict(mod_posting)["probability"], 4)
+                delta = round(base_score - score_without, 4)
+
+                segs.append({"text": chunk, "score_without": score_without, "delta": delta})
+                sentence_rows.append({
+                    "field": field,
+                    "sentence": chunk,
+                    "text": chunk,
+                    "content": chunk,
+                    "score_without": score_without,
+                    "delta": delta,
+                    "impact": delta,
+                    "truncated": False
+                })
+            segments[field] = segs
+
+        # the title is graded as one piece, with its field-level value
+        title_row = next(r for r in field_rows if r["field"] == "title")
+        title_text = posting.get("title") or ""
+        segments["title"] = ([{"text": title_text, "score_without": title_row["score_without"], "delta": title_row["delta"]}]
+                             if not title_row.get("empty") else [{"text": title_text}])
+
+        is_truncated = False
         sentences_payload = {
             "truncated": is_truncated,
             "count": len(sentence_rows),
-            "total": len(raw_sentences),
+            "total": len(sentence_rows),
             "items": sentence_rows,
             "list": sentence_rows,
             "sentences": sentence_rows
@@ -200,7 +237,8 @@ def explain_prediction(job: JobInput):
             "sentences": sentences_payload,
             "sentence_list": sentence_rows,
             "sentence_items": sentence_rows,
-            
+            "segments": segments,
+
             # Text / Summary variations
             "explanation": summary,
             "explanation_text": summary,
